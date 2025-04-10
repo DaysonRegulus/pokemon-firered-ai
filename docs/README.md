@@ -1,32 +1,89 @@
-# Stable-retro docs
+# Pokémon FireRed AI Agent
 
-This folder contains the documentation for [StableRetro](https://github.com/Farama-Foundation/stable-retro).
+An AI agent trained to play Pokémon FireRed using the Stable-Baselines3 reinforcement learning framework.
 
-If you are modifying an atari environment page, please follow the instructions below. For more information about how to contribute to the documentation go to our [CONTRIBUTING.md](https://github.com/Farama-Foundation/Celshast/blob/main/CONTRIBUTING.md)
+---
 
-## Instructions for modifying environment pages
+## 🎯 Project Goal
 
-TODO - Add details
+Train reinforcement learning (RL) agents capable of playing Pokémon FireRed effectively, using visual feedback and emulator RAM values as reward signals.
 
-## Build the Documentation
+---
 
-Install the required packages and StableRetro (or your fork):
+## 🧠 Agent Overview
+
+This project uses a CNN-based policy to train the agent, with reward signals engineered from:
+
+- Visual exploration (new areas discovered)
+- Pokémon leveling up
+- Fainting events (self and opponent)
+- Real-time battle statistics (HP, level, etc.)
+
+These signals are derived from direct memory (RAM) reads of the emulator.
+
+---
+
+## 🚀 Getting Started
+
+To run the project, simply execute:
+
+```bash
+python FireRedRender.py
+```
+This will start the training process (or load an existing pre-trained model if available).
+
+All environment setup (gym, stable-retro, reward manager) is handled internally. The script runs in a compact form, assuming dependencies are already installed.
+
+---
+
+## 🖥️ Environment
+
+- WSL Ubuntu
+
+- Virtual Environment (venv)
+
+- Python 3.10+
+
+- GPU Acceleration (CUDA supported)
+
+---
+
+## 🔁 Workflow
+
+- Parallelized environments for faster training
+
+- Reward management via RAM data
+
+- Model checkpoints for resuming training
+
+---
+
+## 📁 File Structure
 
 ```
-pip install stableretro
-pip install -r docs/requirements.txt
-```
-
-To build the documentation once:
-
-```
-cd docs
-make dirhtml
-```
-
-To rebuild the documentation automatically every time a change is made:
+Project
+|
+│──FireRedRender.py                         # Main training loop
+│──FireRedRewardManager.py                  # Custom reward logic from emulator RAM
+|──PokemonFireRed-GBA_ppo_model_8penv.zip   #Pre-trained model
+│
+└───Docs
+    │──README.md
+    │──License
 
 ```
-cd docs
-sphinx-autobuild -b dirhtml . _build
-```
+
+---
+
+## 📽️ Media Showcase
+
+Soon
+
+---
+
+## 🙌 Acknowledgements
+
+- [Farama Foundation](https://farama.org/) for `stable-retro`
+- [MatPoliquin](https://github.com/MatPoliquin) for foundational work on RAM mapping and wrappers
+- [Peter Whidden](https://github.com/PWhiddy) for key contributions to retro gaming AI environments
+
