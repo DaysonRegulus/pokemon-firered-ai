@@ -1,0 +1,25 @@
+    1  sudo apt-get update
+    2  sudo apt-get install python3.10 python3-pip git zliblg-dev libopenmpi-dev ffmpeg
+    3  sudo apt-get install python3.10 python3-pip git zlib1g-dev libopenmpi-dev ffmpeg
+    4  mkdir github
+    5  cd github
+    6  git clone https://github.com/Farama-Foundation/stable-retro.git
+    7  cd stable-retro
+    8  sudo pip3 install -U virtualenv
+    9  virtualenv --system-site-packages -p python3 ~/vretro
+   10  source ~/vretro/bin/activate
+   11  pip3 install -e .
+   12  pip3 install stable_baselines3[extra]
+   13  sudo apt-get install python3-opengl
+   14  history > command_history.txt
+   15  notepad.exe command_history.txt
+   16  cd ~/github/stable-retro
+   17  source ~/vretro/bin/activate
+   18  ./gym-retro-integration
+   19  sudo apt-get install capnproto libcapnp-dev libqt5opengl5-dev qtbase5-dev
+   20  cmake . -DBUILD_UI-ON -UPYLIB_DIRECTORY
+   21  sudo apt  install cmake  # version 3.22.1-1ubuntu1.22.04.2
+   22  cmake . -DBUILD_UI-ON -UPYLIB_DIRECTORY
+   23  cmake . -DBUILD_UI=ON -UPYLIB_DIRECTORY
+   24  make -j$(grep -c ^processor /proc/cpuinfo)
+   25  history > command_history2.txt

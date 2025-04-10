@@ -1,0 +1,91 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.so
+
+# CMake build files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+build/
+*.cmake
+
+# Compiled dynamic libraries and static archives
+*.o
+*.a
+*.lo
+*.la
+*.dll
+*.dylib
+*.lib
+*.exe
+
+# Python virtual environment
+venv/
+env/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment/configuration
+.env
+.env.*  # If you use dotenv files with specific names
+
+# Package manager artifacts
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+pip-wheel-metadata/
+
+# ROM files
+*.gba
+*.7z
+
+# Large model files / weights / training data
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.h5
+*.tflite
+*.npy
+*.npz
+
+# IDE-specific
+.vscode/
+.idea/
+*.code-workspace
+
+# Git-related
+*.orig
+*.swp
+
+# Dataset directories
+datasets/
+data/
+outputs/
+results/
+
+# Custom project files 
+command_history.txt
+command_history_2.txt
+FireRed_Render/Copy Zone-Identifier
+FireRed_Render/
+libretro-core/
+pokemon-related zips
+ppo_project.toml
+setup.py (this can stay if you're distributing the package)
+
+*.png
