@@ -2,13 +2,9 @@
 
 An AI agent trained to play Pokémon FireRed using the Stable-Baselines3 reinforcement learning framework.
 
----
-
 ## 🎯 Project Goal
 
 Train reinforcement learning (RL) agents capable of playing Pokémon FireRed effectively, using visual feedback and emulator RAM values as reward signals.
-
----
 
 ## 🧠 Agent Overview
 
@@ -21,8 +17,6 @@ This project uses a CNN-based policy to train the agent, with reward signals eng
 
 These signals are derived from direct memory (RAM) reads of the emulator.
 
----
-
 ## 🚀 Getting Started
 
 To run the project, simply execute:
@@ -34,8 +28,6 @@ This will start the training process (or load an existing pre-trained model if a
 
 All environment setup (gym, stable-retro, reward manager) is handled internally. The script runs in a compact form, assuming dependencies are already installed.
 
----
-
 ## 🖥️ Environment
 
 - WSL Ubuntu
@@ -46,8 +38,6 @@ All environment setup (gym, stable-retro, reward manager) is handled internally.
 
 - GPU Acceleration (CUDA supported)
 
----
-
 ## 🔁 Workflow
 
 - Parallelized environments for faster training
@@ -55,8 +45,6 @@ All environment setup (gym, stable-retro, reward manager) is handled internally.
 - Reward management via RAM data
 
 - Model checkpoints for resuming training
-
----
 
 ## 📁 File Structure
 
@@ -73,13 +61,9 @@ Project
 
 ```
 
----
-
 ## 📽️ Media Showcase
 
 Soon
-
----
 
 ## 🙌 Acknowledgements
 
