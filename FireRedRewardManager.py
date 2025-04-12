@@ -62,7 +62,7 @@ class CustomRewardEnv(gym.Wrapper):
         """
         Perform additional actions between steps (if needed), this can often be left empty.
         """
-        # You can add custom logic here if necessary.
+        # Can add custom logic here if necessary.
         pass
 
     def step(self, action):
