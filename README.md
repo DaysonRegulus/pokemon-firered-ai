@@ -1,5 +1,7 @@
 # Pokémon FireRed AI Agent
 
+![Thumbnail](media/AIPlays.PNG)
+
 An AI agent trained to play **Pokémon FireRed** using the **Stable-Baselines3** reinforcement learning framework.
 
 ## 🎯 Project Goal
