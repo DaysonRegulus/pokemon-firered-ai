@@ -53,14 +53,10 @@ All environment setup (gym, stable-retro, reward manager) is handled internally.
 
 ## 📽️ Media Showcase
 
-<!-- TODO: Add GIFs or YouTube link demonstrating training progress or gameplay -->
+![AI Demo](media/demo1.gif)
 
 ## 🙌 Acknowledgements
 
 * [Farama Foundation](https://farama.org) for **stable-retro**
 * [MatPoliquin](https://github.com/MatPoliquin) for foundational work on RAM mapping and wrappers
 * [Peter Whidden](https://github.com/peterwhidden) for key contributions to retro gaming AI environments
-
-## 📄 License
-
-<!-- TODO: Add license later -->
