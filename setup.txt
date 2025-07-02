@@ -1,0 +1,16 @@
+    1  sudo apt-get update
+    2  sudo apt-get install python3.10 python3-pip git zlib1g-dev libopenmpi-dev ffmpeg
+    3  mkdir github
+    4  cd github
+    5  git clone https://github.com/Farama-Foundation/stable-retro.git
+    6  cd stable-retro
+    7  sudo pip3 install -U virtualenv
+    8  virtualenv --system-site-packages -p python3 ~/vretro
+    9  source ~/vretro/bin/activate
+   10  pip3 install -e .
+   11  pip3 install stable_baselines3[extra]
+   12  sudo apt-get install python3-opengl
+   13  sudo apt-get install capnproto libcapnp-dev libqt5opengl5-dev qtbase5-dev
+   14  sudo apt  install cmake  # version 3.22.1-1ubuntu1.22.04.2
+   15  cmake . -DBUILD_UI=ON -UPYLIB_DIRECTORY
+   16  make -j$(grep -c ^processor /proc/cpuinfo)
