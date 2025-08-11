@@ -10,6 +10,8 @@ Train reinforcement learning (RL) agents capable of playing Pokémon FireRed eff
 
 ## 🧠 Agent Overview
 
+<img src="media/Screenshot1.png" alt="drawing" width="800"/> 
+
 This project uses a CNN-based policy to train the agent, with reward signals engineered from:
 
 * Visual exploration (new areas discovered)
