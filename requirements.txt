@@ -1,0 +1,25 @@
+# PyTorch with CUDA 12.1 support
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+
+# Reinforcement Learning & Simulation
+gymnasium==1.2.3
+stable-baselines3==2.8.0
+pyglet==1.5.31
+farama-notifications==0.0.6
+
+# Image & Frame Processing
+opencv-python==5.0.0.93
+scikit-image==0.25.2
+pillow==12.3.0
+imageio==2.38.0
+numpy==2.2.6
+scipy==1.15.3
+
+# Telemetry, Hardware & Logging
+tensorboard==2.21.0
+psutil==7.2.2
+gputil==1.4.0
+matplotlib==3.10.9
+pandas==2.3.3
