@@ -78,10 +78,19 @@ class ComprehensiveLoggingCallback(BaseCallback):
 class RewardTrackingCallback(BaseCallback):
     """
     Tracks extrinsic, intrinsic, and total rewards separately for TensorBoard.
+    Supports single or multiple simultaneous exploration callbacks (hybrid curiosity).
     """
-    def __init__(self, intrinsic_callback=None, rnd_callback=None, verbose=0):
+    def __init__(self, intrinsic_callback=None, intrinsic_callbacks=None, rnd_callback=None, verbose=0):
         super().__init__(verbose)
-        self.intrinsic_callback = intrinsic_callback if intrinsic_callback is not None else rnd_callback
+        if intrinsic_callbacks is not None:
+            self.intrinsic_callbacks = list(intrinsic_callbacks)
+        elif intrinsic_callback is not None:
+            self.intrinsic_callbacks = [intrinsic_callback]
+        elif rnd_callback is not None:
+            self.intrinsic_callbacks = [rnd_callback]
+        else:
+            self.intrinsic_callbacks = []
+
         self.total_extrinsic = 0.0
         self.total_intrinsic = 0.0
         self.total_combined = 0.0
@@ -89,16 +98,14 @@ class RewardTrackingCallback(BaseCallback):
     def _on_step(self) -> bool:
         rewards = self.locals["rewards"]
 
-        if self.intrinsic_callback is not None and self.intrinsic_callback.last_intrinsic is not None:
-            intrinsic_rewards = self.intrinsic_callback.last_intrinsic
-            extrinsic_rewards = self.intrinsic_callback.last_extrinsic
-        else:
-            intrinsic_rewards = np.zeros_like(rewards)
-            extrinsic_rewards = rewards
+        # Sum intrinsic rewards across all active curiosity callbacks
+        step_intrinsic = 0.0
+        for cb in self.intrinsic_callbacks:
+            if hasattr(cb, "last_intrinsic") and cb.last_intrinsic is not None:
+                step_intrinsic += float(np.sum(cb.last_intrinsic))
 
-        step_intrinsic = np.sum(intrinsic_rewards)
-        step_extrinsic = np.sum(extrinsic_rewards)
-        step_total = np.sum(rewards)
+        step_total = float(np.sum(rewards))
+        step_extrinsic = step_total - step_intrinsic
 
         self.total_intrinsic += step_intrinsic
         self.total_extrinsic += step_extrinsic
@@ -252,6 +259,60 @@ class RNDCallback(BaseCallback):
             print(f"[RND][TRAIN] Predictor Loss: {loss:.5f}")
 
         self.logger.record("rnd/loss", loss)
+
+
+class CoordinateExplorationCallback(BaseCallback):
+    """
+    Callback that computes count-based coordinate novelty rewards:
+        r_coord = beta * (1.0 / sqrt(N(map, x, y)))
+    from ground-truth RAM coordinates and adds them to policy rewards.
+    """
+    def __init__(self, coord_module, beta=0.05, debug=True, verbose=0):
+        super().__init__(verbose)
+        self.coord_module = coord_module
+        self.beta = beta
+        self.debug = debug
+        self.last_intrinsic = None
+        self.last_total_reward = None
+        self.last_extrinsic = None
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        if not infos:
+            return True
+
+        # Extract coordinates from info dict (injected by CustomRewardEnv)
+        map_banks = [info.get("map_bank", 0) for info in infos]
+        map_nums = [info.get("map_num", 0) for info in infos]
+        xs = [info.get("pos_x", 0) for info in infos]
+        ys = [info.get("pos_y", 0) for info in infos]
+
+        norm_reward, is_new = self.coord_module.compute_intrinsic_reward(map_banks, map_nums, xs, ys)
+        norm_reward = norm_reward.reshape(self.locals["rewards"].shape)
+
+        scaled_intrinsic = self.beta * norm_reward
+        original_rewards = self.locals["rewards"].copy()
+
+        self.locals["rewards"] = self.locals["rewards"] + scaled_intrinsic
+
+        self.last_intrinsic = scaled_intrinsic.copy()
+        self.last_total_reward = self.locals["rewards"].copy()
+        self.last_extrinsic = original_rewards.copy()
+
+        for i in range(len(infos)):
+            infos[i]["coord_intrinsic_reward"] = scaled_intrinsic[i]
+
+        self.logger.record("coord/reward_norm_mean", float(np.mean(norm_reward)))
+        self.logger.record("coord/reward_norm_max", float(np.max(norm_reward)))
+        self.logger.record("coord/unique_tiles_count", self.coord_module.unique_tiles_discovered)
+
+        if self.debug and self.n_calls % 100 == 0:
+            print(
+                f"[COORD] norm_r={np.mean(norm_reward):.3f} (max={np.max(norm_reward):.3f}) | "
+                f"Tiles={self.coord_module.unique_tiles_discovered} | beta={self.beta}"
+            )
+
+        return True
 
 
 class RAMExplorationTrackerCallback(BaseCallback):

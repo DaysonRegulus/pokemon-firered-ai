@@ -20,27 +20,36 @@ from pokefirered.callbacks import (
     RewardTrackingCallback,
     RNDCallback,
     SSIMCallback,
+    CoordinateExplorationCallback,
     RAMExplorationTrackerCallback,
     PeriodicVisualEvalCallback,
 )
+from pokefirered.coord_module import CoordinateExplorationModule
 from pokefirered.env_factory import create_vectorized_env
 from pokefirered.rnd import RNDModule
 from pokefirered.ssim_module import OptimizedSSIMModule
 
 
 def get_model_paths(model_dir: Path, env_name: str, num_envs: int, exploration_mode: str):
-    prefix = f"{env_name}-{exploration_mode}-{num_envs}env"
+    clean_mode = exploration_mode.replace("+", "_")
+    prefix = f"{env_name}-{clean_mode}-{num_envs}env"
     model_path = model_dir / prefix
     rnd_path = model_dir / f"{prefix}_rnd.pth"
     ssim_path = model_dir / f"{prefix}_ssim.pt"
-    return model_path, rnd_path, ssim_path
+    coord_path = model_dir / f"{prefix}_coord.pt"
+    return model_path, rnd_path, ssim_path, coord_path
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Pokemon FireRed RL Agent")
     parser.add_argument("--env-name", type=str, default="PokemonFireRed-GBA", help="Retro env name")
     parser.add_argument("--num-envs", type=int, default=8, help="Number of parallel environments (recommended: 8 or 12)")
-    parser.add_argument("--exploration", type=str, default="RND", choices=["RND", "SSIM", "LEGACY_SSIM", "NONE"], help="Exploration mode")
+    parser.add_argument(
+        "--exploration",
+        type=str,
+        default="RND",
+        help="Exploration mode: RND, SSIM, COORD, NONE, or hybrid combinations like RND+COORD, SSIM+COORD, RND+SSIM, RND+SSIM+COORD",
+    )
     parser.add_argument("--timesteps", type=int, default=None, help="Explicit training steps (overrides dynamic curriculum)")
     parser.add_argument("--render-mode", type=str, default=None, choices=["human", None], help="Render mode")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda/cpu)")
@@ -48,6 +57,7 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Model checkpoints directory")
     parser.add_argument("--rnd-beta", type=float, default=0.05, help="Weight for normalized RND intrinsic reward (default: 0.05)")
     parser.add_argument("--ssim-beta", type=float, default=0.05, help="Weight for normalized SSIM intrinsic reward (default: 0.05)")
+    parser.add_argument("--coord-beta", type=float, default=0.05, help="Weight for coordinate count intrinsic reward (default: 0.05)")
     parser.add_argument("--ent-coef", type=float, default=0.03, help="Entropy coefficient for PPO")
     parser.add_argument("--visual-eval", action="store_true", help="Enable periodic evaluation GIF recordings")
     parser.add_argument("--eval-freq", type=int, default=20480, help="Timestep frequency for periodic visual evaluations")
@@ -63,23 +73,30 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
 
     run_name = f"Pokemon_PPO_{int(time.time())}"
-    model_path, rnd_path, ssim_path = get_model_paths(checkpoint_dir, args.env_name, args.num_envs, args.exploration)
+    model_path, rnd_path, ssim_path, coord_path = get_model_paths(checkpoint_dir, args.env_name, args.num_envs, args.exploration)
+
+    active_modes = [m.strip().upper() for m in args.exploration.split("+")]
 
     print("=" * 65)
     print(f" Starting Training Session: {run_name}")
     print(f" Environments: {args.num_envs} | Exploration: {args.exploration} | Device: {args.device}")
+    print(f" Active Modes: {active_modes}")
     print(f" Checkpoint:   {model_path}")
     print(f" TensorBoard:  {log_dir}")
     print(f" Visual Eval:  {'Enabled (every ' + str(args.eval_freq) + ' steps)' if args.visual_eval else 'Disabled'}")
     print("=" * 65)
 
-    # Initialize Exploration module if requested
+    # Initialize Exploration modules
     rnd_module = None
     ssim_module = None
-    if args.exploration == "RND":
+    coord_module = None
+
+    if "RND" in active_modes:
         rnd_module = RNDModule(device=args.device)
-    elif args.exploration == "SSIM":
+    if "SSIM" in active_modes:
         ssim_module = OptimizedSSIMModule(device=args.device)
+    if "COORD" in active_modes:
+        coord_module = CoordinateExplorationModule(beta=args.coord_beta)
 
     # Create vectorized environment
     print(f"Creating {args.num_envs} vectorized environments...")
@@ -88,7 +105,7 @@ def main():
         num_envs=args.num_envs,
         n_stack=2,
         render_mode=args.render_mode,
-        exploration_mode=args.exploration,
+        exploration_mode="SSIM" if "LEGACY_SSIM" in active_modes else "NONE",
     )
 
     # Load or initialize PPO model
@@ -98,12 +115,15 @@ def main():
         model = PPO.load(str(model_path), env=vec_env, device=args.device)
         model.tensorboard_log = str(log_dir)
         model.ent_coef = args.ent_coef
-        if args.exploration == "RND" and rnd_path.exists():
+        if rnd_module is not None and rnd_path.exists():
             print(f"Loading RND checkpoint from {rnd_path}...")
             rnd_module.load(str(rnd_path))
-        elif args.exploration == "SSIM" and ssim_path.exists():
+        if ssim_module is not None and ssim_path.exists():
             print(f"Loading SSIM bank checkpoint from {ssim_path}...")
             ssim_module.load(str(ssim_path))
+        if coord_module is not None and coord_path.exists():
+            print(f"Loading Coordinate counts checkpoint from {coord_path}...")
+            coord_module.load(str(coord_path))
     else:
         print("No existing model found. Initializing new PPO model...")
         model = PPO(
@@ -138,19 +158,21 @@ def main():
     print(f"[CURRICULUM] Steps scheduled for this run: {target_steps:,}\n")
 
     # Setup callbacks
-    intrinsic_cb = None
-    if args.exploration == "RND":
-        intrinsic_cb = RNDCallback(rnd_module, beta=args.rnd_beta, debug=True)
-    elif args.exploration == "SSIM":
-        intrinsic_cb = SSIMCallback(ssim_module, beta=args.ssim_beta, debug=True)
+    intrinsic_cbs = []
+    if rnd_module is not None:
+        rnd_cb = RNDCallback(rnd_module, beta=args.rnd_beta, debug=True)
+        intrinsic_cbs.append(rnd_cb)
+    if ssim_module is not None:
+        ssim_cb = SSIMCallback(ssim_module, beta=args.ssim_beta, debug=True)
+        intrinsic_cbs.append(ssim_cb)
+    if coord_module is not None:
+        coord_cb = CoordinateExplorationCallback(coord_module, beta=args.coord_beta, debug=True)
+        intrinsic_cbs.append(coord_cb)
 
-    reward_callback = RewardTrackingCallback(intrinsic_callback=intrinsic_cb)
+    reward_callback = RewardTrackingCallback(intrinsic_callbacks=intrinsic_cbs)
     logging_callback = ComprehensiveLoggingCallback()
     exploration_tracker = RAMExplorationTrackerCallback()
-    callbacks = [reward_callback, logging_callback, exploration_tracker]
-
-    if intrinsic_cb is not None:
-        callbacks.append(intrinsic_cb)
+    callbacks = [logging_callback, exploration_tracker] + intrinsic_cbs + [reward_callback]
 
     if args.visual_eval:
         visual_eval_callback = PeriodicVisualEvalCallback(
@@ -181,21 +203,26 @@ def main():
 
         print(f"Saving model to {model_path}...")
         model.save(str(model_path))
-        if args.exploration == "RND":
+        if rnd_module is not None:
             print(f"Saving RND model to {rnd_path}...")
             rnd_module.save(str(rnd_path))
-        elif args.exploration == "SSIM":
+        if ssim_module is not None:
             print(f"Saving SSIM bank to {ssim_path}...")
             ssim_module.save(str(ssim_path))
+        if coord_module is not None:
+            print(f"Saving Coordinate counts to {coord_path}...")
+            coord_module.save(str(coord_path))
         print("Save complete.")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Saving current weights...")
         model.save(str(model_path))
-        if args.exploration == "RND":
+        if rnd_module is not None:
             rnd_module.save(str(rnd_path))
-        elif args.exploration == "SSIM":
+        if ssim_module is not None:
             ssim_module.save(str(ssim_path))
+        if coord_module is not None:
+            coord_module.save(str(coord_path))
     finally:
         vec_env.close()
 
