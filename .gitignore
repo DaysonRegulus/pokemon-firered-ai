@@ -1,0 +1,32 @@
+# Original source folder - strictly read-only and excluded from git
+original_src/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+
+# Checkpoints and logs (large binary model weights and TensorBoard logs)
+logs/
+checkpoints/
+*.zip
+*.pth
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
