@@ -61,7 +61,7 @@ def create_vectorized_env(
         for i in range(num_envs)
     ]
 
-    if num_envs == 1 or render_mode == "human":
+    if num_envs == 1:
         vec_env = DummyVecEnv(env_fns)
     else:
         vec_env = SubprocVecEnv(env_fns)
