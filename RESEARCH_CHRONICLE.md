@@ -537,3 +537,82 @@ Based on our empirical benchmark throughput ($335 - 440\text{ SPS}$ for RND, $85
 1. **Throughput Advantage**: RND is approximately $\mathbf{3.8\times}$ faster in raw frame processing speed than GPU SSIM.
 2. **Algorithmic Search Advantage**: RND is approximately $\mathbf{2.5\times - 3\times}$ more sample-efficient on complex backtracking quests due to representation drift.
 3. **Compound Speedup**: In end-to-end wall-clock time, **RND reaches Pewter City $\approx 10\times$ faster than SSIM** ($5.5 - 14\text{ hours}$ vs. $3 - 7\text{ days}$).
+
+---
+
+## [2026-10-14 16:52:00] Phase 8: Scientific Integrity Protocol, Explicit Limitations & Evidence Boundaries
+
+### 1. Epistemological Classification: Evidence vs. Estimates
+
+To prevent agent hallucination, preserve academic rigor, and maintain strict scientific integrity for the research manuscript, all claims in this chronicle are explicitly demarcated into two distinct categories:
+
+#### Category A: Empirically Verified Telemetry (Ground Truth Evidence)
+*Directly measured, reproducible, and recorded within this repository.*
+
+1. **Environmental Step Range**: $0 \le t \le 16,384$ discrete timesteps.
+2. **Hardware Execution Throughput**:
+   - Calibrated RND: $334.7\text{ SPS}$ ($N=8$ envs), $440.3\text{ SPS}$ ($N=12$ envs).
+   - GPU-Accelerated SSIM: $84.4\text{ SPS}$ ($N=8$ envs, dynamic bank of 735 anchors).
+   - Legacy CPU SSIM: $< 0.3\text{ SPS}$ ($N=8$ envs, 500 bank frames).
+3. **Verified GBA RAM Coordinates**:
+   - Map Bank (`0x02031DBC`), Map Number (`0x02031DBD`), Player X (`0x02036E48`), Player Y (`0x02036E4A`).
+4. **Spatial Discovery Boundary**:
+   - Exactly **115 unique $(X, Y)$ tiles** verified discovered across 3 maps:
+     - Map 3.0: Red's Bedroom
+     - Map 3.1: Pallet Town Living Room
+     - Map 3.0: Pallet Town Overworld Exterior
+5. **Numerical Stability & Loss Convergence**:
+   - RND unit test: $74.3\%$ curiosity error reduction on familiar states.
+   - RND pilot training: Predictor loss converged from $0.448 \to 0.091$ ($79\%$ reduction).
+   - SSIM inference latency: $2.50\text{ ms}$ on CUDA for $N=8$ environments.
+   - SSIM bank growth: Dynamically expanded from $0 \to 598 \to 735$ keyframes.
+6. **Artifact Generation**:
+   - Deterministic visual evaluation GIFs successfully recorded and verified (`eval_step_0001024.gif` through `eval_step_0016384.gif`).
+
+---
+
+#### Category B: Theoretical Estimates & Mathematical Projections (Unverified Hypotheses)
+*Derived by combining measured SPS throughput with external baseline literature (Whidden 2023; Burda et al. 2018). These figures MUST be cited strictly as projected estimates until experimentally verified.*
+
+1. **Pewter City Step Estimates**:
+   - Scenario A (Pure Curiosity): Projected $8\text{M} - 20\text{M}$ steps (RND) vs. $25\text{M} - 62\text{M}$ steps (SSIM).
+   - Scenario B (Milestone-Assisted): Projected $2.5\text{M} - 6\text{M}$ steps (RND) vs. $4\text{M} - 9\text{M}$ steps (SSIM).
+2. **Pewter City Wall-Clock Estimates**:
+   - RND: Projected $5.5 - 14\text{ hours}$ (Pure) / $1.7 - 4.2\text{ hours}$ (Milestone).
+   - SSIM: Projected $70 - 170\text{ hours}$ (Pure) / $11 - 25\text{ hours}$ (Milestone).
+3. **Backtracking Paradox Behavioral Dynamics**:
+   - The hypothesis that RND representation drift will autonomously guide the agent south through Route 1 faster than SSIM is an analytical deduction based on neural forgetting dynamics; it has **not yet been verified in vivo** beyond Pallet Town.
+
+---
+
+### 2. Explicit Limitations: Boundaries of the Current Implementation
+
+The following boundaries define what could **not** be verified with the current experimental runs:
+
+1. **Long-Horizon Policy Stability**:
+   - **Limitation**: The agent has only been evaluated up to $16,384$ steps.
+   - **Risk / Boundary**: The policy has not been verified against long-term catastrophic policy collapse, spinning in place, or getting trapped in infinite dialogue/menu loops in the overworld.
+2. **Oak's Parcel Traversal**:
+   - **Limitation**: No agent has yet reached Viridian City or interacted with the Poké Mart clerk.
+   - **Risk / Boundary**: The exact number of steps required to naturally discover the Poké Mart interior and trigger the parcel delivery event without explicit reward shaping is unknown.
+3. **Combat Policy & Type Matchups**:
+   - **Limitation**: The model has not yet completed the Rival 1 battle or fought wild Pokémon in Route 1 grass under trained policy actions.
+   - **Risk / Boundary**: Battle success rates, move selection efficiency, and survival against Bug Catcher poison hazards in Viridian Forest are unverified.
+4. **Hardware Thermal Throttling over Multi-Day Workloads**:
+   - **Limitation**: Throughput benchmarks were conducted in bursts of $< 15$ minutes.
+   - **Risk / Boundary**: Continuous 10+ hour training on mobile hardware (laptop RTX 3050 Ti and mobile CPU) may induce thermal throttling, causing actual SPS to degrade by $15\% - 30\%$ below short-term benchmark numbers.
+
+---
+
+### 3. Protection of Intellectual Property & Sensitive Assets
+
+In compliance with academic, legal, and software engineering standards:
+
+1. **Strict Isolation of Proprietary Binaries**:
+   - The game ROM (`Pokemon FireRed.gba`) is treated strictly as an external, read-only binary dependency.
+   - No decompilation, binary patching, code extraction, or redistribution of copyrighted game code or multimedia assets has occurred.
+   - The `original_src/` directory is strictly read-only and excluded from version control tracking.
+2. **Non-Invasive Observation & Memory Access**:
+   - Environment observation is restricted to standard frame buffer capture ($84 \times 84$ grayscale) and non-invasive RAM inspection of public state offsets (player coordinates, HP values) via the standard emulator interface.
+3. **Novel Research IP**:
+   - All architectural contributions—including the two-stage hierarchical SSIM GPU pooling algorithm, calibrated RND running normalization wrappers, and decoupled vectorized callbacks—are original, cleanly separated, and suitable for open academic publication.
