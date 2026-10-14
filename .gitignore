@@ -23,8 +23,10 @@ eggs/
 # Checkpoints and logs (large binary model weights and TensorBoard logs)
 logs/
 checkpoints/
+eval_recordings/
 *.zip
 *.pth
+*.gif
 
 # IDE and OS files
 .vscode/

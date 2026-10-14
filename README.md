@@ -67,27 +67,35 @@ python scripts/play_manual.py
 - `X` : A button (Confirm / Interact)
 - `Q` : Quit
 
-### 3. Training the Agent
-Run PPO training with RND curiosity:
+### 3. Hardware Scalability Benchmarking
+Run the automated environment sweep across 2, 4, 8, 12, and 16 environments to measure throughput (SPS) and memory usage:
 ```powershell
-# Default: 2 parallel environments with RND exploration on GPU
-python scripts/train.py --num-envs 2 --exploration RND
-
-# Benchmark with 8 environments
-python scripts/train.py --num-envs 8 --exploration RND
-
-# Watch training with rendering enabled
-python scripts/train.py --num-envs 1 --render-mode human
+python scripts/benchmark_envs.py --envs 2 4 8 12 16 --steps 1024
 ```
+**Empirical Benchmark Results on RTX 3050 Ti & 8-Core CPU:**
+- **8 envs**: 334.7 SPS | 2.2 GB RAM (Rock-solid conservative configuration)
+- **12 envs**: 440.3 SPS | 2.6 GB RAM (**Optimal sweet spot for high throughput**)
+- **16 envs**: 500.0 SPS | 4.6 GB RAM (High performance, tight memory headroom)
 
-### 4. Evaluating a Checkpoint
+### 4. Training the Agent with Calibrated RND & Visual Checks
+Run PPO training with calibrated RND curiosity, RAM exploration tracking, and periodic visual evaluation GIFs:
+```powershell
+# High-speed training with periodic visual GIF evaluation every 20,480 steps
+python scripts/train.py --num-envs 8 --exploration RND --visual-eval --eval-freq 20480
+
+# Maximum throughput training (12 parallel environments)
+python scripts/train.py --num-envs 12 --exploration RND --visual-eval
+```
+*Generated evaluation GIFs are saved directly to `eval_recordings/eval_step_XXXXX.gif`.*
+
+### 5. Evaluating a Checkpoint
 Run a trained model with human rendering:
 ```powershell
-python scripts/evaluate.py --model-path checkpoints/PokemonFireRed-GBA-RND-2env.zip
+python scripts/evaluate.py --model-path checkpoints/PokemonFireRed-GBA-RND-8env.zip --render-mode human
 ```
 
-### 5. Monitoring with TensorBoard
-View hardware utilization, environment steps per second, cumulative opponent faints, and intrinsic curiosity rewards:
+### 6. Monitoring with TensorBoard
+View hardware utilization, environment steps per second, cumulative opponent faints, unique RAM coordinates explored, and RND predictor loss:
 ```powershell
 tensorboard --logdir ./logs --host 0.0.0.0 --port 6006
 ```

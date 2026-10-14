@@ -113,6 +113,14 @@ class CustomRewardEnv(gym.Wrapper):
             info['ssim_bank_size'] = 0
         info['episode_faints'] = self.episode_faints
 
+        # Extract Ground-Truth Player Coordinates from RAM for exploration tracking
+        ram = self.base_env.unwrapped.get_ram()
+        BASE = 0x02000000
+        info['map_bank'] = int(ram[0x02031DBC - BASE])
+        info['map_num'] = int(ram[0x02031DBD - BASE])
+        info['pos_x'] = int(ram[0x02036E48 - BASE])
+        info['pos_y'] = int(ram[0x02036E4A - BASE])
+
         rnd_reward = info.get("rnd_intrinsic_reward", 0)
         if rnd_reward != 0:
             print(f"[{self.env_id}][RND][REWARD] (+{rnd_reward:.4f})")
