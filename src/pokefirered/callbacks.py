@@ -79,9 +79,9 @@ class RewardTrackingCallback(BaseCallback):
     """
     Tracks extrinsic, intrinsic, and total rewards separately for TensorBoard.
     """
-    def __init__(self, rnd_callback=None, verbose=0):
+    def __init__(self, intrinsic_callback=None, rnd_callback=None, verbose=0):
         super().__init__(verbose)
-        self.rnd_callback = rnd_callback
+        self.intrinsic_callback = intrinsic_callback if intrinsic_callback is not None else rnd_callback
         self.total_extrinsic = 0.0
         self.total_intrinsic = 0.0
         self.total_combined = 0.0
@@ -89,9 +89,9 @@ class RewardTrackingCallback(BaseCallback):
     def _on_step(self) -> bool:
         rewards = self.locals["rewards"]
 
-        if self.rnd_callback is not None and self.rnd_callback.last_intrinsic is not None:
-            intrinsic_rewards = self.rnd_callback.last_intrinsic
-            extrinsic_rewards = self.rnd_callback.last_extrinsic
+        if self.intrinsic_callback is not None and self.intrinsic_callback.last_intrinsic is not None:
+            intrinsic_rewards = self.intrinsic_callback.last_intrinsic
+            extrinsic_rewards = self.intrinsic_callback.last_extrinsic
         else:
             intrinsic_rewards = np.zeros_like(rewards)
             extrinsic_rewards = rewards
@@ -116,6 +116,67 @@ class RewardTrackingCallback(BaseCallback):
             "intrinsic": self.total_intrinsic,
             "total": self.total_extrinsic + self.total_intrinsic,
         }
+
+
+class SSIMCallback(BaseCallback):
+    """
+    Callback that computes calibrated GPU-accelerated SSIM novelty rewards
+    and adds them to policy rewards.
+    """
+    def __init__(self, ssim_module, beta=0.05, debug=True, verbose=0):
+        super().__init__(verbose)
+        self.ssim_module = ssim_module
+        self.beta = beta
+        self.debug = debug
+        self.last_intrinsic = None
+        self.last_total_reward = None
+        self.last_extrinsic = None
+
+    def _on_step(self) -> bool:
+        obs = self.locals.get("new_obs", None)
+        if obs is None:
+            obs = self.locals.get("obs", None)
+
+        if obs is None:
+            return True
+
+        obs_np = np.array(obs, dtype=np.float32)
+
+        # Extract only latest frame from frame stack: (N, 1, 84, 84)
+        if obs_np.ndim == 4:
+            obs_np = obs_np[:, -1:, :, :]
+
+        obs_np = obs_np / 255.0
+
+        # Compute continuous novelty reward on GPU
+        norm_reward, is_new = self.ssim_module.compute_intrinsic_reward(obs_np)
+        norm_reward = norm_reward.reshape(self.locals["rewards"].shape)
+
+        scaled_intrinsic = self.beta * norm_reward
+        original_rewards = self.locals["rewards"].copy()
+
+        self.locals["rewards"] = self.locals["rewards"] + scaled_intrinsic
+
+        self.last_intrinsic = scaled_intrinsic.copy()
+        self.last_total_reward = self.locals["rewards"].copy()
+        self.last_extrinsic = original_rewards.copy()
+
+        infos = self.locals.get("infos", [])
+        for i in range(len(infos)):
+            infos[i]["ssim_bank_size"] = self.ssim_module.bank_size
+            infos[i]["ssim_intrinsic_reward"] = scaled_intrinsic[i]
+
+        self.logger.record("ssim/reward_norm_mean", float(np.mean(norm_reward)))
+        self.logger.record("ssim/reward_norm_max", float(np.max(norm_reward)))
+        self.logger.record("ssim/bank_size", self.ssim_module.bank_size)
+
+        if self.debug and self.n_calls % 100 == 0:
+            print(
+                f"[SSIM] norm_r={np.mean(norm_reward):.3f} (max={np.max(norm_reward):.3f}) | "
+                f"Bank Size={self.ssim_module.bank_size} | beta={self.beta}"
+            )
+
+        return True
 
 
 class RNDCallback(BaseCallback):

@@ -19,31 +19,35 @@ from pokefirered.callbacks import (
     ComprehensiveLoggingCallback,
     RewardTrackingCallback,
     RNDCallback,
+    SSIMCallback,
     RAMExplorationTrackerCallback,
     PeriodicVisualEvalCallback,
 )
 from pokefirered.env_factory import create_vectorized_env
 from pokefirered.rnd import RNDModule
+from pokefirered.ssim_module import OptimizedSSIMModule
 
 
 def get_model_paths(model_dir: Path, env_name: str, num_envs: int, exploration_mode: str):
     prefix = f"{env_name}-{exploration_mode}-{num_envs}env"
     model_path = model_dir / prefix
     rnd_path = model_dir / f"{prefix}_rnd.pth"
-    return model_path, rnd_path
+    ssim_path = model_dir / f"{prefix}_ssim.pt"
+    return model_path, rnd_path, ssim_path
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Pokemon FireRed RL Agent")
     parser.add_argument("--env-name", type=str, default="PokemonFireRed-GBA", help="Retro env name")
     parser.add_argument("--num-envs", type=int, default=8, help="Number of parallel environments (recommended: 8 or 12)")
-    parser.add_argument("--exploration", type=str, default="RND", choices=["RND", "SSIM", "NONE"], help="Exploration mode")
+    parser.add_argument("--exploration", type=str, default="RND", choices=["RND", "SSIM", "LEGACY_SSIM", "NONE"], help="Exploration mode")
     parser.add_argument("--timesteps", type=int, default=None, help="Explicit training steps (overrides dynamic curriculum)")
     parser.add_argument("--render-mode", type=str, default=None, choices=["human", None], help="Render mode")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda/cpu)")
     parser.add_argument("--log-dir", type=str, default="logs", help="Tensorboard log directory")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Model checkpoints directory")
     parser.add_argument("--rnd-beta", type=float, default=0.05, help="Weight for normalized RND intrinsic reward (default: 0.05)")
+    parser.add_argument("--ssim-beta", type=float, default=0.05, help="Weight for normalized SSIM intrinsic reward (default: 0.05)")
     parser.add_argument("--ent-coef", type=float, default=0.03, help="Entropy coefficient for PPO")
     parser.add_argument("--visual-eval", action="store_true", help="Enable periodic evaluation GIF recordings")
     parser.add_argument("--eval-freq", type=int, default=20480, help="Timestep frequency for periodic visual evaluations")
@@ -59,7 +63,7 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
 
     run_name = f"Pokemon_PPO_{int(time.time())}"
-    model_path, rnd_path = get_model_paths(checkpoint_dir, args.env_name, args.num_envs, args.exploration)
+    model_path, rnd_path, ssim_path = get_model_paths(checkpoint_dir, args.env_name, args.num_envs, args.exploration)
 
     print("=" * 65)
     print(f" Starting Training Session: {run_name}")
@@ -69,10 +73,13 @@ def main():
     print(f" Visual Eval:  {'Enabled (every ' + str(args.eval_freq) + ' steps)' if args.visual_eval else 'Disabled'}")
     print("=" * 65)
 
-    # Initialize RND module if requested
+    # Initialize Exploration module if requested
     rnd_module = None
+    ssim_module = None
     if args.exploration == "RND":
         rnd_module = RNDModule(device=args.device)
+    elif args.exploration == "SSIM":
+        ssim_module = OptimizedSSIMModule(device=args.device)
 
     # Create vectorized environment
     print(f"Creating {args.num_envs} vectorized environments...")
@@ -94,6 +101,9 @@ def main():
         if args.exploration == "RND" and rnd_path.exists():
             print(f"Loading RND checkpoint from {rnd_path}...")
             rnd_module.load(str(rnd_path))
+        elif args.exploration == "SSIM" and ssim_path.exists():
+            print(f"Loading SSIM bank checkpoint from {ssim_path}...")
+            ssim_module.load(str(ssim_path))
     else:
         print("No existing model found. Initializing new PPO model...")
         model = PPO(
@@ -128,15 +138,19 @@ def main():
     print(f"[CURRICULUM] Steps scheduled for this run: {target_steps:,}\n")
 
     # Setup callbacks
-    reward_callback = RewardTrackingCallback(rnd_callback=None)
+    intrinsic_cb = None
+    if args.exploration == "RND":
+        intrinsic_cb = RNDCallback(rnd_module, beta=args.rnd_beta, debug=True)
+    elif args.exploration == "SSIM":
+        intrinsic_cb = SSIMCallback(ssim_module, beta=args.ssim_beta, debug=True)
+
+    reward_callback = RewardTrackingCallback(intrinsic_callback=intrinsic_cb)
     logging_callback = ComprehensiveLoggingCallback()
     exploration_tracker = RAMExplorationTrackerCallback()
     callbacks = [reward_callback, logging_callback, exploration_tracker]
 
-    if args.exploration == "RND":
-        rnd_callback = RNDCallback(rnd_module, beta=args.rnd_beta, debug=True)
-        reward_callback.rnd_callback = rnd_callback
-        callbacks.append(rnd_callback)
+    if intrinsic_cb is not None:
+        callbacks.append(intrinsic_cb)
 
     if args.visual_eval:
         visual_eval_callback = PeriodicVisualEvalCallback(
@@ -170,6 +184,9 @@ def main():
         if args.exploration == "RND":
             print(f"Saving RND model to {rnd_path}...")
             rnd_module.save(str(rnd_path))
+        elif args.exploration == "SSIM":
+            print(f"Saving SSIM bank to {ssim_path}...")
+            ssim_module.save(str(ssim_path))
         print("Save complete.")
 
     except KeyboardInterrupt:
@@ -177,6 +194,8 @@ def main():
         model.save(str(model_path))
         if args.exploration == "RND":
             rnd_module.save(str(rnd_path))
+        elif args.exploration == "SSIM":
+            ssim_module.save(str(ssim_path))
     finally:
         vec_env.close()
 

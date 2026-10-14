@@ -74,7 +74,7 @@ class CustomRewardEnv(gym.Wrapper):
         self.base_env = base_env
         self.env_id = env_id
 
-        if exploration_mode == "SSIM":
+        if exploration_mode == "LEGACY_SSIM":
             self.screenshot_manager = ScreenshotManager(max_bank_size=1000, similarity_threshold=0.1, verbosity=True)
         else:
             self.screenshot_manager = None

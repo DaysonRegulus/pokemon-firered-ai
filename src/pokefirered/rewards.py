@@ -42,11 +42,8 @@ class RewardManager:
         frame_skip=5,
     ):
         self.env = env
-        self.screenshot_manager = screenshot_manager
         self.exploration_mode = exploration_mode
-
-        if exploration_mode != "SSIM":
-            self.screenshot_manager = None
+        self.screenshot_manager = screenshot_manager if exploration_mode == "LEGACY_SSIM" else None
 
         # State tracking
         self.prev_party_hp = [0] * 6
@@ -179,8 +176,8 @@ class RewardManager:
 
         self.faint_count_this_step = 0
 
-        # Capture and process exploration reward
-        if self.exploration_mode == "SSIM":
+        # Capture and process exploration reward (legacy in-env method)
+        if self.exploration_mode == "LEGACY_SSIM" and self.screenshot_manager is not None:
             screenshot = self.capture_screenshot(self.env.unwrapped.get_screen())
             if self.screenshot_manager.is_new_location(screenshot):
                 self.screenshot_manager.add_to_bank(screenshot)
