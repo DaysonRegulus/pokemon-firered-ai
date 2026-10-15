@@ -26,7 +26,15 @@ checkpoints/
 eval_recordings/
 *.zip
 *.pth
+*.pt
 *.gif
+!media/*.gif
+
+# Sensitive ROM binaries (copyright protection)
+*.gba
+*.gbc
+*.gb
+!rom.sha
 
 # IDE and OS files
 .vscode/

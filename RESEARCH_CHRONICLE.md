@@ -751,3 +751,59 @@ $$\text{step\_extrinsic} = \text{step\_total} - \text{step\_intrinsic}$$
   - Cumulative unique tiles discovered: **104 tiles** across 3 maps (Bedroom, Living Room, Pallet Town Overworld).
   - Clean Reward Separation: Extrinsic $0.00$, Intrinsic $531.06$, Total $531.06$.
   - Multi-checkpoint persistence verified: Saved PPO model (`.zip`), RND weights (`_rnd.pth`), and Coordinate counts (`_coord.pt`).
+
+
+---
+
+## [2026-10-15 12:50:00] Phase 11: Repository Modernization, IP Safeguards & Multi-Branch Git Integration
+
+### 1. Research Objectives & Version Control Architecture
+
+To facilitate long-term open-source reproducibility, collaborative research, and legal distribution:
+1. **Preservation of Legacy Linux Artifacts**:
+   - The user's historical Linux/WSL2 monolithic training codebase (`origin/main`) contains historical baseline scripts and checkpoints.
+   - Objective: Safely preserve this state in an immutable, dedicated branch named `legacy-linux` on GitHub.
+2. **Promotion of Modular v2 Engine to `master`**:
+   - Establish the Windows-native/cross-platform modular architecture (`src/pokefirered/`, `scripts/train.py`, multi-curiosity engine) as the new primary `master` head.
+3. **Intellectual Property & DMCA Compliance Protocol**:
+   - Commercial Nintendo Game Boy Advance ROM binaries (`rom.gba`) must NEVER be hosted or tracked in Git version control to protect against copyright infringement and repository takedowns.
+4. **Preservation of Documentation and Visual Assets**:
+   - Original media (`media/AIPlays.PNG`, `media/Screenshot1.PNG`, `media/demo1.gif`) and legacy documentation (`doc/README.md`) preserved and integrated into the modernized root documentation.
+
+---
+
+### 2. Execution Log & Verification
+
+#### A. Remote Branch Creation (`legacy-linux`)
+- **Action**: Pushed remote `origin/main` directly to `refs/heads/legacy-linux` on GitHub without rewriting history.
+- **Command**: `git push origin origin/main:refs/heads/legacy-linux`
+- **Result**: Successfully created `legacy-linux` branch on GitHub (`https://github.com/DaysonRegulus/pokemon-firered-ai/tree/legacy-linux`).
+
+#### B. Sensitive Binary Untracking & Gitignore Hardening
+- **Action**: Removed `rom.gba` from Git's index while keeping the physical local file intact for local execution.
+- **Command**: `git rm --cached data/custom_integrations/PokemonFireRed-GBA/rom.gba`
+- **Gitignore Configuration**:
+  ```gitignore
+  # Sensitive ROM binaries (copyright protection)
+  *.gba
+  *.gbc
+  *.gb
+  !rom.sha
+  ```
+- **Verification**: Verified with `git status --ignored` that `rom.gba` is recognized as ignored and queued for index deletion.
+
+#### C. Documentation & Media Preservation
+- **Action**: Retrieved legacy assets from `origin/main` into the working tree:
+  - `doc/README.md`
+  - `media/AIPlays.PNG`
+  - `media/Screenshot1.PNG`
+  - `media/demo1.gif`
+- **Gitignore Tuning**: Added explicit exception `!media/*.gif` to prevent repo showcase GIFs from being hidden by checkpoint `.gif` ignore patterns.
+
+#### D. Modernized Root Documentation (`README.md`)
+- **Action**: Overhauled `README.md` with:
+  - Visual showcase gallery featuring autonomous gameplay, battle telemetry, and policy execution.
+  - Multi-paradigm curiosity exploration guide (RND, SSIM, COORD, Hybrids).
+  - GBA DMA memory invariance documentation and empirical proof references.
+  - Cross-platform quickstart instructions for Windows PowerShell and Linux Bash.
+  - Direct links to research chronicle and benchmark performance tables.
