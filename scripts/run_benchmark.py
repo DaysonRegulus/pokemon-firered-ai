@@ -114,7 +114,7 @@ def main():
     print(" [SUMMARY] PPO vs QR-DQN FACTORIAL COMPARISON REPORT")
     print("=" * 80)
 
-    all_summary_files = sorted(checkpoint_dir.glob("PokemonFireRed-GBA-*-*-*_summary.json"))
+    all_summary_files = sorted(checkpoint_dir.glob("*_summary.json"))
     final_results = []
     if all_summary_files:
         for s_file in all_summary_files:

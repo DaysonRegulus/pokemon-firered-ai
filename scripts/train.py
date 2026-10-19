@@ -108,56 +108,72 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     if coord_module is not None and coord_path.exists():
         coord_module.load(str(coord_path))
 
-    target_steps = args.timesteps or 20480
-    print(f"\n[QR-DQN + PER] Scheduled steps for this session: {target_steps:,}\n")
+    total_target_timesteps = args.timesteps or 20480
+    target_iterations = max(1, total_target_timesteps // args.num_envs)
+    total_steps = target_iterations * args.num_envs
+    print(f"\n[QR-DQN + PER] Scheduled iterations: {target_iterations:,} ({total_steps:,} total environment steps across {args.num_envs} envs)\n")
 
     visited_tiles = set()
     visited_maps = set()
     total_extrinsic = 0.0
     total_intrinsic = 0.0
 
+    rnd_rollout_buffer = [] if rnd_module is not None else None
+
     obs = vec_env.reset()
     start_time = time.time()
 
-    for step in range(target_steps):
+    for step in range(target_iterations):
         # Epsilon decay schedule
-        progress = min(1.0, (agent.train_steps * args.num_envs) / max(1, args.epsilon_decay_steps))
+        progress = min(1.0, (step * args.num_envs) / max(1, args.epsilon_decay_steps))
         epsilon = args.epsilon_start - progress * (args.epsilon_start - args.epsilon_end)
 
-        # Select actions for all parallel environments
-        actions = [agent.select_action(obs[i], epsilon=epsilon) for i in range(args.num_envs)]
+        # Batch action selection for parallel environments
+        actions = agent.select_actions(obs, epsilon=epsilon)
         next_obs, rewards, dones, infos = vec_env.step(actions)
 
-        # Compute intrinsic curiosity bonuses
+        # Compute intrinsic curiosity bonuses vectorially
+        obs_latest = next_obs[:, -1:, :, :].astype(np.float32) / 255.0
+
+        r_rnd_vec = None
+        if rnd_module is not None:
+            r_rnd_vec, _ = rnd_module.compute_intrinsic_reward(obs_latest)
+            if rnd_rollout_buffer is not None:
+                rnd_rollout_buffer.append(obs_latest)
+                if len(rnd_rollout_buffer) >= 32:  # 32 * num_envs = 256 samples
+                    batch_rnd = np.concatenate(rnd_rollout_buffer, axis=0)
+                    rnd_module.train_batch(batch_rnd, epochs=2, batch_size=64)
+                    rnd_rollout_buffer.clear()
+
+        r_ssim_vec = None
+        if ssim_module is not None:
+            r_ssim_vec, _ = ssim_module.compute_intrinsic_reward(obs_latest)
+
+        r_coord_vec = None
+        if coord_module is not None:
+            map_banks = [infos[i].get("map_bank", 0) for i in range(args.num_envs)]
+            map_nums = [infos[i].get("map_num", 0) for i in range(args.num_envs)]
+            xs = [infos[i].get("pos_x", 0) for i in range(args.num_envs)]
+            ys = [infos[i].get("pos_y", 0) for i in range(args.num_envs)]
+            r_coord_vec, _ = coord_module.compute_intrinsic_reward(map_banks, map_nums, xs, ys)
+
         for i in range(args.num_envs):
             r_ext = float(rewards[i])
             r_int = 0.0
 
-            # 1. RND Curiosity
-            if rnd_module is not None:
-                obs_t = torch.from_numpy(obs[i]).unsqueeze(0).to(args.device).float() / 255.0
-                r_rnd = rnd_module.compute_intrinsic_reward(obs_t).item()
-                r_int += args.rnd_beta * r_rnd
+            if r_rnd_vec is not None:
+                r_int += args.rnd_beta * float(r_rnd_vec[i])
+            if r_ssim_vec is not None:
+                r_int += args.ssim_beta * float(r_ssim_vec[i])
+            if r_coord_vec is not None:
+                r_int += args.coord_beta * float(r_coord_vec[i])
 
-            # 2. SSIM Curiosity
-            if ssim_module is not None:
-                obs_t = torch.from_numpy(obs[i]).unsqueeze(0).to(args.device).float() / 255.0
-                r_ssim = ssim_module.compute_intrinsic_reward(obs_t).item()
-                r_int += args.ssim_beta * r_ssim
-
-            # 3. Coordinate Curiosity
-            if coord_module is not None:
-                info = infos[i]
-                if "x" in info and "y" in info and "map_id" in info:
-                    tile_key = (info["map_id"], info["x"], info["y"])
-                    r_coord = coord_module.compute_reward(tile_key)
-                    r_int += r_coord
-
-            # Telemetry tracking
+            # Ground-truth RAM coordinates tracking
             info = infos[i]
-            if "x" in info and "y" in info and "map_id" in info:
-                visited_tiles.add((info["map_id"], info["x"], info["y"]))
-                visited_maps.add(info["map_id"])
+            if "pos_x" in info and "pos_y" in info and "map_bank" in info:
+                tile = (info["map_bank"], info["map_num"], info["pos_x"], info["pos_y"])
+                visited_tiles.add(tile)
+                visited_maps.add((info["map_bank"], info["map_num"]))
 
             total_extrinsic += r_ext
             total_intrinsic += r_int
@@ -166,18 +182,18 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
             # Add transition to Prioritized Replay Buffer
             agent.buffer.add(obs[i], actions[i], r_total, next_obs[i], dones[i])
 
-        # Optimize QR-DQN network
+        # Optimize QR-DQN network with Quantile Huber loss
         metrics = agent.update()
         obs = next_obs
 
-        if (step + 1) % 500 == 0 or step == target_steps - 1:
+        if (step + 1) % 100 == 0 or step == target_iterations - 1:
             elapsed = time.time() - start_time
-            sps = (step + 1) * args.num_envs / max(0.001, elapsed)
+            curr_timesteps = (step + 1) * args.num_envs
+            sps = curr_timesteps / max(0.001, elapsed)
             q_str = f"Q-loss: {metrics['qr_loss']:.4f} | Mean Q: {metrics['mean_q']:.3f}" if metrics else "Warmup"
-            print(f"  [STEP {step+1:6d}/{target_steps:6d}] SPS: {sps:5.1f} | Eps: {epsilon:.3f} | {q_str} | Tiles: {len(visited_tiles)}")
+            print(f"  [STEP {curr_timesteps:6d}/{total_steps:6d}] SPS: {sps:5.1f} | Eps: {epsilon:.3f} | {q_str} | Tiles: {len(visited_tiles)} | Maps: {len(visited_maps)}")
 
     elapsed = time.time() - start_time
-    total_steps = target_steps * args.num_envs
     sps = total_steps / max(0.001, elapsed)
 
     print("\n" + "=" * 55)
@@ -190,12 +206,20 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     print(f" Average SPS      : {sps:.1f}")
     print(f" Extrinsic Reward : {total_extrinsic:.2f}")
     print(f" Intrinsic Reward : {total_intrinsic:.2f}")
+    print(f" Total Reward     : {total_extrinsic + total_intrinsic:.2f}")
     print(f" Total Unique Tiles Discovered: {len(visited_tiles)}")
     print(f" Total Unique Maps Discovered:  {len(visited_maps)}")
     print("=" * 55 + "\n")
 
     # Save checkpoints & metrics summary
     agent.save(model_file_pth)
+    if rnd_module is not None:
+        rnd_module.save(str(rnd_path))
+    if ssim_module is not None:
+        ssim_module.save(str(ssim_path))
+    if coord_module is not None:
+        coord_module.save(str(coord_path))
+
     summary_data = {
         "algo": "QRDQN",
         "exploration": args.exploration,
@@ -205,6 +229,7 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
         "sps": round(sps, 1),
         "extrinsic_reward": round(total_extrinsic, 2),
         "intrinsic_reward": round(total_intrinsic, 2),
+        "total_reward": round(total_extrinsic + total_intrinsic, 2),
         "unique_tiles": len(visited_tiles),
         "unique_maps": len(visited_maps),
     }

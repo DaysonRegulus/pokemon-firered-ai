@@ -135,7 +135,7 @@ class QRDQNAgent:
         self.train_steps = 0
 
     def select_action(self, state: np.ndarray, epsilon: float = 0.05) -> int:
-        """Epsilon-greedy action selection."""
+        """Epsilon-greedy action selection for a single observation."""
         if np.random.random() < epsilon:
             return int(np.random.randint(self.num_actions))
 
@@ -143,6 +143,23 @@ class QRDQNAgent:
             s_tensor = torch.from_numpy(state).unsqueeze(0).to(self.device).float() / 255.0
             q_values = self.online_net.get_q_values(s_tensor)
             return int(q_values.argmax(dim=-1).item())
+
+    def select_actions(self, states: np.ndarray, epsilon: float = 0.05) -> list:
+        """Batch epsilon-greedy action selection for parallel environments."""
+        batch_size = states.shape[0]
+        random_actions = np.random.randint(0, self.num_actions, size=batch_size)
+        random_mask = np.random.random(size=batch_size) < epsilon
+
+        if np.all(random_mask):
+            return random_actions.tolist()
+
+        with torch.no_grad():
+            s_tensor = torch.as_tensor(states, dtype=torch.float32, device=self.device) / 255.0
+            q_values = self.online_net.get_q_values(s_tensor)
+            greedy_actions = q_values.argmax(dim=-1).cpu().numpy()
+
+        chosen_actions = np.where(random_mask, random_actions, greedy_actions)
+        return chosen_actions.tolist()
 
     def update(self) -> Optional[Dict[str, float]]:
         """
