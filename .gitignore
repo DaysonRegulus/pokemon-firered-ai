@@ -29,6 +29,8 @@ eval_recordings/
 *.pt
 *.gif
 !media/*.gif
+*.mp4
+!media/*.mp4
 
 # Sensitive ROM binaries (copyright protection)
 *.gba
