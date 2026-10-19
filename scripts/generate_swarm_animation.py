@@ -256,14 +256,18 @@ def main():
     print("Synthesizing multi-generation agent trajectory swarm (Gens 1, 10, 35, 75, 100)...")
     trajectories = generate_multi_gen_trajectories(num_gens=5, agents_per_gen=8, max_steps=300)
 
-    renderer = SwarmRenderer(viewport_w=640, viewport_h=400)
+    renderer = SwarmRenderer(viewport_w=760, viewport_h=480)
     print("Rendering animated timelapse video and showcase GIF with GBA Red & Leaf avatars...")
     renderer.generate_timelapse(
         trajectories_by_gen=trajectories,
         output_video_path=video_path,
         output_gif_path=gif_path,
-        fps=24,
-        trail_length=14
+        fps=15,
+        trail_length=14,
+        gif_duration_ms=125,
+        gif_frame_skip=2,
+        intro_hold_frames=15,
+        outro_hold_frames=30
     )
 
     # Also update media/kanto_swarm_showcase.gif

@@ -31,8 +31,8 @@ class SwarmRenderer:
         self,
         mapper: Optional[KantoWorldMapper] = None,
         assets_dir: Optional[Path] = None,
-        viewport_w: int = 640,
-        viewport_h: int = 400
+        viewport_w: int = 760,
+        viewport_h: int = 480
     ):
         self.mapper = mapper or KantoWorldMapper(tile_size=16)
         
@@ -101,13 +101,14 @@ class SwarmRenderer:
 
         return Image.fromarray(rgba_arr, mode="RGBA")
 
-    def _get_avatar_sprite(self, gen: int, direction: str, walk_frame: int, is_leaf: bool = False) -> Image.Image:
+    def _get_avatar_sprite(self, gen: int, direction: str, walk_frame: int, is_leaf: bool = False, scale: float = 1.0) -> Image.Image:
         """
-        Retrieves or generates a tinted, directional 16x32 GBA walking sprite.
+        Retrieves or generates a tinted, directional GBA walking sprite.
         direction: 'down', 'up', 'left', 'right'
         walk_frame: 0 (walk left), 1 (stand), 2 (walk right)
+        scale: scale factor for resized interior maps (e.g. 0.75 for Viridian Forest)
         """
-        cache_key = (gen, direction, walk_frame, is_leaf)
+        cache_key = (gen, direction, walk_frame, is_leaf, scale)
         if cache_key in self.sprite_cache:
             return self.sprite_cache[cache_key]
 
@@ -137,6 +138,11 @@ class SwarmRenderer:
         crop = sheet.crop((f_idx * 16, 0, (f_idx + 1) * 16, 32))
         if flip_h:
             crop = crop.transpose(Image.FLIP_LEFT_RIGHT)
+
+        if scale != 1.0:
+            tw = max(4, int(crop.width * scale))
+            th = max(8, int(crop.height * scale))
+            crop = crop.resize((tw, th), Image.Resampling.NEAREST)
 
         self.sprite_cache[cache_key] = crop
         return crop
@@ -198,8 +204,12 @@ class SwarmRenderer:
         trajectories_by_gen: Dict[int, List[List[Tuple[int, int, int, int]]]],
         output_video_path: Path,
         output_gif_path: Optional[Path] = None,
-        fps: int = 24,
-        trail_length: int = 14
+        fps: int = 15,
+        trail_length: int = 14,
+        gif_duration_ms: int = 125,
+        gif_frame_skip: int = 2,
+        intro_hold_frames: int = 15,
+        outro_hold_frames: int = 30
     ):
         """
         Renders multi-generation agent trajectories onto the canonical 32-bit GBA FireRed map.
@@ -303,6 +313,8 @@ class SwarmRenderer:
                         alpha = max(0.2, 1.0 - (t_back / trail_length))
                         trail_pts.append((t_px + 8, t_py + 8, alpha))
 
+                    scale = self.mapper.get_map_scale(bank, num)
+
                     active_heads.append({
                         'gen': agent['gen'],
                         'is_leaf': agent['is_leaf'],
@@ -310,7 +322,8 @@ class SwarmRenderer:
                         'py': py,
                         'direction': direction,
                         'walk_frame': wf,
-                        'trail_pts': trail_pts
+                        'trail_pts': trail_pts,
+                        'scale': scale,
                     })
 
             # Calculate target camera position (focused dynamically on the exploration frontier)
@@ -325,9 +338,9 @@ class SwarmRenderer:
                 target_x = 0.85 * f_target_x + 0.15 * all_mean_x
                 target_y = f_target_y
 
-                # Smooth camera tracking
-                cam_x = 0.88 * cam_x + 0.12 * target_x
-                cam_y = 0.88 * cam_y + 0.12 * target_y
+                # Gentle, cinematic camera smoothing (eliminates rapid whip-pans)
+                cam_x = 0.94 * cam_x + 0.06 * target_x
+                cam_y = 0.94 * cam_y + 0.06 * target_y
 
             # Clamp viewport within map
             crop_x1 = int(max(0, min(self.map_w - self.viewport_w, cam_x - self.viewport_w / 2)))
@@ -351,14 +364,16 @@ class SwarmRenderer:
             # Draw GBA Red / Leaf avatar sprites
             for head in active_heads:
                 sx = head['px'] - crop_x1
-                # GBA sprites are 32px tall, offset by -16px vertically so feet land on tile
-                sy = head['py'] - 16 - crop_y1
+                sc = head.get('scale', 1.0)
+                # Offset by -16 * scale vertically so feet land naturally on tile
+                sy = head['py'] - int(16 * sc) - crop_y1
                 if -16 <= sx < self.viewport_w and -32 <= sy < self.viewport_h:
                     sprite = self._get_avatar_sprite(
                         head['gen'],
                         head['direction'],
                         head['walk_frame'],
-                        is_leaf=head['is_leaf']
+                        is_leaf=head['is_leaf'],
+                        scale=sc
                     )
                     frame.paste(sprite, (int(sx), int(sy)), sprite)
 
@@ -376,25 +391,40 @@ class SwarmRenderer:
             # Write to video
             rgb_arr = np.array(frame.convert("RGB"))
             bgr_arr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
+
+            # Intro hold: hold frame at step 0 so viewer can register the initial setup
+            if step == 0:
+                for _ in range(intro_hold_frames):
+                    out_writer.write(bgr_arr)
+                    if output_gif_path:
+                        gif_frames.append(frame.convert("RGB"))
+
             out_writer.write(bgr_arr)
 
-            # Capture GIF frames (every 2nd frame for 24fps -> 12fps smooth loop)
-            if output_gif_path and step % 2 == 0:
+            # Capture GIF frames
+            if output_gif_path and (step % gif_frame_skip == 0):
                 gif_frames.append(frame.convert("RGB"))
 
-            if (step + 1) % 40 == 0 or step == max_steps - 1:
+            # Outro hold: hold final frame on Brock & Boulder badge victory
+            if step == max_steps - 1:
+                for _ in range(outro_hold_frames):
+                    out_writer.write(bgr_arr)
+                    if output_gif_path:
+                        gif_frames.append(frame.convert("RGB"))
+
+            if (step + 1) % 50 == 0 or step == max_steps - 1:
                 print(f"  [RENDER PROGRESS] Step {step+1:3d}/{max_steps:3d} | Cam: ({int(cam_x)}, {int(cam_y)}) | Frontier: {frontier_landmark}")
 
         out_writer.release()
         print(f"[SUCCESS] Exported 32-bit GBA FireRed swarm video: {output_video_path}")
 
         if output_gif_path and gif_frames:
-            print(f"[SWARM RENDERER] Compiling animated GIF ({len(gif_frames)} frames)...")
+            print(f"[SWARM RENDERER] Compiling animated GIF ({len(gif_frames)} frames @ {gif_duration_ms}ms/frame)...")
             gif_frames[0].save(
                 str(output_gif_path),
                 save_all=True,
                 append_images=gif_frames[1:],
-                duration=50,
+                duration=gif_duration_ms,
                 loop=0,
                 optimize=True
             )

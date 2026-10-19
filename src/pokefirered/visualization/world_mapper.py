@@ -19,13 +19,14 @@ class KantoWorldMapper:
         (3, 19): (62, 214),   # Route 1 (20x48 tiles) -> (992px, 3424px)
         (3, 1): (52, 178),    # Viridian City (40x36 tiles) -> (832px, 2848px)
         (3, 20): (62, 118),   # Route 2 (20x60 tiles) -> (992px, 1888px)
-        (1, 0): (85, 105),    # Viridian Forest Full Interior (54x69 tiles) -> (1360px, 1680px)
+        (1, 0): (87, 109),    # Viridian Forest (0.75x scaled, 648x828px) -> (1392px, 1750px)
         (3, 2): (50, 60),     # Pewter City (40x36 tiles) -> (800px, 960px)
         (6, 2): (35, 65),     # Pewter Gym Arena Interior (12x15 tiles) -> (560px, 1040px)
-        # Mt Moon Caves & Route 4 Insets
-        (1, 1): (94, 10),     # Mt Moon 1F (48x40 tiles) -> (1504px, 160px)
-        (1, 2): (144, 10),    # Mt Moon B1F (47x20 tiles) -> (2304px, 160px)
-        (1, 3): (144, 31),    # Mt Moon B2F (48x40 tiles) -> (2304px, 500px)
+        (5, 1): (97, 172),    # Viridian Gym Interior (20x23 tiles) -> (1550px, 2750px)
+        # Mt Moon Caves (0.5x scaled, Y=100 in empty North void)
+        (1, 1): (94, 6),      # Mt Moon 1F -> (1500px, 100px)
+        (1, 2): (122, 6),     # Mt Moon B1F -> (1950px, 100px)
+        (1, 3): (150, 6),     # Mt Moon B2F -> (2400px, 100px)
     }
 
     # Walkable tile bounds [min_x, max_x, min_y, max_y] per map to eliminate out-of-bounds drift
@@ -124,16 +125,38 @@ class KantoWorldMapper:
         cx, cy = self.clamp_to_walkable(bank, num, x, y)
         return (cx == x and cy == y)
 
-    def to_global_tile_coords(self, bank: int, num: int, x: int, y: int) -> Tuple[int, int]:
-        """Returns global (tile_x, tile_y) on the canonical GBA FireRed composite map grid."""
-        cx, cy = self.clamp_to_walkable(bank, num, x, y)
-        offset = self.CANONICAL_OFFSETS.get((bank, num), (62, 262))
-        return offset[0] + cx, offset[1] + cy
+    def get_map_scale(self, bank: int, num: int) -> float:
+        """Returns the rendering scale factor of the map inset."""
+        if (bank, num) == (1, 0):
+            return 0.75
+        elif (bank, num) in [(1, 1), (1, 2), (1, 3)]:
+            return 0.5
+        return 1.0
 
     def to_global_pixel_coords(self, bank: int, num: int, x: int, y: int) -> Tuple[int, int]:
         """Returns global pixel (px, py) on kanto_firered_composite_full.png."""
-        tx, ty = self.to_global_tile_coords(bank, num, x, y)
-        return int(tx * self.tile_size), int(ty * self.tile_size)
+        cx, cy = self.clamp_to_walkable(bank, num, x, y)
+        if (bank, num) == (1, 0):
+            # Viridian Forest interior is resized 0.75x to fit zero-collision slot at (1392, 1750)
+            # 1 local tile = 16 * 0.75 = 12 pixels
+            return int(1392 + cx * 12), int(1750 + cy * 12)
+        elif (bank, num) == (1, 1):
+            # Mt Moon 1F resized 0.5x at (1500, 100)
+            return int(1500 + cx * 8), int(100 + cy * 8)
+        elif (bank, num) == (1, 2):
+            # Mt Moon B1F resized 0.5x at (1950, 100)
+            return int(1950 + cx * 8), int(100 + cy * 8)
+        elif (bank, num) == (1, 3):
+            # Mt Moon B2F resized 0.5x at (2400, 100)
+            return int(2400 + cx * 8), int(100 + cy * 8)
+
+        offset = self.CANONICAL_OFFSETS.get((bank, num), (62, 262))
+        return int((offset[0] + cx) * self.tile_size), int((offset[1] + cy) * self.tile_size)
+
+    def to_global_tile_coords(self, bank: int, num: int, x: int, y: int) -> Tuple[int, int]:
+        """Returns global (tile_x, tile_y) on the canonical GBA FireRed composite map grid."""
+        px, py = self.to_global_pixel_coords(bank, num, x, y)
+        return int(px // self.tile_size), int(py // self.tile_size)
 
     def to_global_coords(self, bank: int, num: int, x: int, y: int) -> Tuple[int, int]:
         """Alias for backwards compatibility with swarm renderer."""
@@ -141,3 +164,4 @@ class KantoWorldMapper:
 
     def get_landmark_name(self, bank: int, num: int) -> str:
         return self.LANDMARK_NAMES.get((bank, num), f"Map ({bank}, {num})")
+

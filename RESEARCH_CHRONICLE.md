@@ -1381,4 +1381,67 @@ In GBA FireRed, local tile coordinates in RAM correspond 1:1 with map tiles ($1 
 - **HD MP4 Video**: `visual_evidence/swarm_visualizer/kanto_swarm_timelapse.mp4` (300 frames, 24 fps).
 - **Physical Collision Audit**: 40 agents across 5 generations (1, 10, 35, 75, 100) evaluated for 300 timesteps ($12,000$ agent steps) with $0.0\%$ out-of-bounds steps and $0.0\%$ ledge jumping.
 
+---
+
+## Phase 21: Zero-Collision Interior Map Resizing/Relocation & Readable Pacing Formulation
+**Date**: October 19, 2026  
+**Status**: COMPLETE & VERIFIED (0 Overwritten Overworld Pixels, 125ms/frame Readable Swarm Playback, 760x480 Viewport)
+
+### 1. Mathematical Audit of Master Canvas Overwrites
+An empirical pixel-by-pixel mask difference between the uncomposited base overworld (`assets/pwhiddy/kanto_firered_clean.png`) and the prior composite canvas identified **287,852 overwritten overworld pixels**:
+1. **Cycling Road (Route 17) Truncation ($79,922$ px)**:
+   - The empty space between Route 2 ($X \le 1344$) and Cycling Road ($X \ge 2112$) is 720 pixels wide (45 tiles).
+   - The full-resolution Viridian Forest interior map is 864 pixels wide (54 tiles).
+   - Pasting Viridian Forest at $X = 1360$ extended its eastern border to $X = 2224$, overwriting 112 pixels (7 tiles) of Cycling Road.
+2. **Route 4 & Cerulean City Occlusion ($196,302$ px)**:
+   - Mt. Moon 1F/B1F/B2F insets were pasted at $Y \ge 160$ and extended down to $Y = 1140$, directly occluding Route 4 and western Cerulean City ($Y \in [800, 1142]$).
+3. **Viridian City Tree Occlusion ($11,628$ px)**:
+   - Viridian Gym was pasted at $(1504, 2848)$, clipping 32 pixels into Viridian City’s eastern perimeter foliage.
+
+### 2. Zero-Collision Resizing and Relocation Strategy
+To preserve 100% visibility of all overworld routes and towns:
+- **Viridian Forest Interior (Scaled $0.75\times$)**:
+  - Dimensions scaled from $864 \times 1,104$ px to **$648 \times 828$ px** ($40.5 \times 51.75$ tiles) using bilinear filtering.
+  - Relocated to $(1392, 1750)$ in the empty central void.
+  - Leaves a 48 px margin to Route 2, a 72 px margin to Cycling Road, and over 200 px to Viridian City.
+  - Overworld overwrite count: **0 pixels**.
+- **Viridian City Gym**:
+  - Relocated east to $(1550, 2750)$ in the empty void space.
+  - Overworld overwrite count: **0 pixels**.
+- **Mt. Moon Complex (Scaled $0.5\times$)**:
+  - Rescaled: 1F ($384 \times 316$ px), B1F ($378 \times 162$ px), B2F ($384 \times 320$ px).
+  - Aligned horizontally in the northern empty void at $Y = 100$: 1F at $(1500, 100)$, B1F at $(1950, 100)$, B2F at $(2400, 100)$.
+  - Max Y coordinate is $420$, leaving a massive 380 px buffer above Route 4 ($Y = 800$).
+  - Overworld overwrite count: **0 pixels**.
+- **Pewter City Gym**:
+  - Anchored at $(560, 1040)$ west of Pewter City. Overworld overwrite count: **0 pixels**.
+- **Hero's Home 2F & 1F**:
+  - Anchored at $(752, 4192)$ and $(752, 4352)$ west of Pallet Town in void ocean. Overworld overwrite count: **0 pixels**.
+- **Audit Result**: Automated verification confirmed **0 overwritten overworld pixels across the entire $6,528 \times 6,400$ canvas**.
+
+### 3. Coordinate Transformation & Avatar Sprite Scaling
+- **Piecewise Local-to-Global Mapping**:
+  $$\text{Global Pixel}(x, y) = \begin{cases} (1392 + 12x, 1750 + 12y) & \text{if Map } (1, 0) \text{ [Viridian Forest, } 0.75\times\text{]} \\ (1500 + 8x, 100 + 8y) & \text{if Map } (1, 1) \text{ [Mt Moon 1F, } 0.5\times\text{]} \\ (1950 + 8x, 100 + 8y) & \text{if Map } (1, 2) \text{ [Mt Moon B1F, } 0.5\times\text{]} \\ (2400 + 8x, 100 + 8y) & \text{if Map } (1, 3) \text{ [Mt Moon B2F, } 0.5\times\text{]} \\ ((x_{\text{local}} + \text{mapX}) \times 16, (y_{\text{local}} + \text{mapY}) \times 16) & \text{otherwise} \end{cases}$$
+- **Avatar Proportional Scaling**:
+  When inside a scaled map (Viridian Forest), avatar sprites are scaled using nearest-neighbor sampling to $12 \times 24$ px ($0.75\times$), perfectly proportioned to the 12 px walkable corridors with zero boundary clipping. Outside the forest, sprites are rendered at native $16 \times 32$ px.
+
+### 4. Readable Pacing & Cinematic Presentation
+To address user feedback regarding rapid, unperceivable playback:
+- **Duration & Frame Rate**:
+  - GIF frame duration increased from $50\text{ ms}$ to **$125\text{ ms}$ per frame** (~$8\text{ fps}$), enabling comfortable visual tracking of agent walk cycles and spatial distribution.
+  - Video framerate set to **$15\text{ fps}$** (total runtime $23.0\text{ s}$).
+- **Expanded Viewport**:
+  - Viewport dimensions enlarged from $640 \times 400$ to **$760 \times 480$** (16:10 / 3:2 widescreen), providing peripheral context showing both interior insets and adjacent exterior towns simultaneously.
+- **Cinematic Smoothing**:
+  - Camera tracking smoothing factor adjusted to $\alpha = 0.06$ ($94\%$ momentum, $6\%$ target pull), eliminating rapid whip-pans.
+- **Intro & Climax Pacing Holds**:
+  - **Intro Hold (15 frames = 1.8s)**: Frame 0 held in Red's Bedroom so the viewer can absorb starting positions, telemetry HUD, and generation legend.
+  - **Climax Hold (30 frames = 3.6s)**: Final step held on Gym Leader Brock and the acquired Boulder Badge, giving ample time to inspect the full multi-generation distribution across Kanto.
+
+### 5. Final Verified Outputs
+- **Showcase Animated GIF**: `media/kanto_swarm_showcase.gif` (15.1 MB, 195 frames @ 125ms/frame, 24.4s runtime).
+- **HD MP4 Video**: `visual_evidence/swarm_visualizer/kanto_swarm_timelapse.mp4` (345 frames @ 15 fps, 23.0s runtime, 760x480).
+- **Master Composite Canvas**: `assets/pwhiddy/kanto_firered_composite_full.png` (Verified: 0 overworld pixels overwritten).
+
+
 
