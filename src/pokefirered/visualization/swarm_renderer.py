@@ -5,7 +5,7 @@ Composites authentic 32-bit GBA Pokémon FireRed/LeafGreen player character avat
 onto the canonical kanto_firered_clean.png overworld map with boundary enforcement,
 dynamic camera tracking, and scientific HUD.
 """
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from pathlib import Path
 import cv2
 import numpy as np
@@ -70,15 +70,19 @@ class SwarmRenderer:
 
         self.viewport_w = viewport_w
         self.viewport_h = viewport_h
-        self.sprite_cache: Dict[Tuple[int, str, int, bool], Image.Image] = {}
+        self.sprite_cache: Dict[Tuple[Any, str, int, bool, float], Image.Image] = {}
+        self.custom_palette: Optional[Dict[Any, Tuple[int, int, int]]] = None
 
-    def _get_gen_color(self, generation: int) -> Tuple[int, int, int]:
-        """Returns RGB color keyed or interpolated by generation."""
+    def _get_gen_color(self, generation: Any) -> Tuple[int, int, int]:
+        """Returns RGB color keyed by generation or exploration mode."""
+        if self.custom_palette and generation in self.custom_palette:
+            return self.custom_palette[generation]
         if generation in self.GEN_PALETTE:
             return self.GEN_PALETTE[generation]
-        for g in sorted(self.GEN_PALETTE.keys()):
-            if generation <= g:
-                return self.GEN_PALETTE[g]
+        if isinstance(generation, int):
+            for g in sorted(self.GEN_PALETTE.keys()):
+                if generation <= g:
+                    return self.GEN_PALETTE[g]
         return (0, 220, 255)
 
     def _generate_tinted_sheet(self, base_img: Image.Image, color: Tuple[int, int, int]) -> Image.Image:
@@ -101,7 +105,7 @@ class SwarmRenderer:
 
         return Image.fromarray(rgba_arr, mode="RGBA")
 
-    def _get_avatar_sprite(self, gen: int, direction: str, walk_frame: int, is_leaf: bool = False, scale: float = 1.0) -> Image.Image:
+    def _get_avatar_sprite(self, gen: Any, direction: str, walk_frame: int, is_leaf: bool = False, scale: float = 1.0) -> Image.Image:
         """
         Retrieves or generates a tinted, directional GBA walking sprite.
         direction: 'down', 'up', 'left', 'right'
@@ -153,9 +157,12 @@ class SwarmRenderer:
         step_idx: int,
         total_steps: int,
         unique_tiles: int,
-        max_gen: int,
+        max_gen: Any,
         frontier_landmark: str,
-        boulder_badge: bool
+        boulder_badge: bool,
+        custom_title: Optional[str] = None,
+        custom_legend: Optional[List[Tuple[Any, str]]] = None,
+        group_tiles: Optional[Dict[str, int]] = None
     ):
         """Draws a semi-transparent HUD overlay with research telemetry."""
         overlay = Image.new("RGBA", frame.size, (0, 0, 0, 0))
@@ -163,37 +170,52 @@ class SwarmRenderer:
 
         # Top-Left Telemetry Card
         hud_x, hud_y = 12, 12
-        hud_w, hud_h = 295, 110
+        hud_w, hud_h = 320, 116
         draw.rectangle([hud_x, hud_y, hud_x + hud_w, hud_y + hud_h], fill=(10, 16, 24, 220), outline=(0, 200, 255, 230), width=1)
 
-        draw.text((hud_x + 10, hud_y + 8), "POKEMON FIRERED GBA: SWARM VIZ", fill=(0, 230, 255, 255))
+        title = custom_title or "POKEMON FIRERED GBA: SWARM VIZ"
+        draw.text((hud_x + 10, hud_y + 8), title, fill=(0, 230, 255, 255))
         draw.line([hud_x + 10, hud_y + 24, hud_x + hud_w - 10, hud_y + 24], fill=(0, 140, 180, 180), width=1)
 
-        draw.text((hud_x + 10, hud_y + 28), f"Step: {step_idx:,} / {total_steps:,} | Gens 1-{max_gen}", fill=(225, 225, 225, 255))
-        draw.text((hud_x + 10, hud_y + 44), f"Unique Tiles Discovered: {unique_tiles:,}", fill=(50, 240, 120, 255))
-        draw.text((hud_x + 10, hud_y + 60), f"Frontier: {frontier_landmark.upper()}", fill=(255, 190, 40, 255))
+        draw.text((hud_x + 10, hud_y + 28), f"Step: {step_idx:,} / {total_steps:,}", fill=(225, 225, 225, 255))
+
+        if group_tiles:
+            # Multi-group tile discovery breakdown
+            g_strs = [f"{k}: {v}" for k, v in group_tiles.items()]
+            line1 = " | ".join(g_strs[:2])
+            line2 = " | ".join(g_strs[2:])
+            draw.text((hud_x + 10, hud_y + 44), f"Tiles: {line1}", fill=(50, 240, 120, 255))
+            if line2:
+                draw.text((hud_x + 10, hud_y + 58), f"       {line2}", fill=(50, 240, 120, 255))
+            draw.text((hud_x + 10, hud_y + 74), f"Frontier: {frontier_landmark.upper()}", fill=(255, 190, 40, 255))
+        else:
+            draw.text((hud_x + 10, hud_y + 44), f"Unique Tiles Discovered: {unique_tiles:,}", fill=(50, 240, 120, 255))
+            draw.text((hud_x + 10, hud_y + 60), f"Frontier: {frontier_landmark.upper()}", fill=(255, 190, 40, 255))
 
         badge_txt = "BOULDER BADGE: ACQUIRED [1/8]" if boulder_badge else "BOULDER BADGE: LOCKED [0/8]"
         badge_col = (40, 240, 60, 255) if boulder_badge else (120, 140, 240, 255)
-        draw.text((hud_x + 10, hud_y + 78), badge_txt, fill=badge_col)
+        badge_y = hud_y + 92 if group_tiles else hud_y + 78
+        draw.text((hud_x + 10, badge_y), badge_txt, fill=badge_col)
 
-        # Bottom-Right Generation Legend
-        leg_w, leg_h = 165, 96
-        leg_x = frame.width - leg_w - 12
-        leg_y = frame.height - leg_h - 12
-        draw.rectangle([leg_x, leg_y, leg_x + leg_w, leg_y + leg_h], fill=(10, 16, 24, 220), outline=(80, 80, 90, 200), width=1)
-        draw.text((leg_x + 8, leg_y + 6), "GENERATION PALETTE", fill=(200, 200, 200, 255))
-
-        legend_items = [
+        # Bottom-Right Legend
+        legend_items = custom_legend or [
             (1, "Gen 1 (Pallet)"),
             (10, "Gen 10 (Route 1)"),
             (35, "Gen 35 (Viridian)"),
             (75, "Gen 75 (Forest)"),
             (100, "Gen 100 (Brock)"),
         ]
+        leg_h = 24 + len(legend_items) * 16
+        leg_w = 180
+        leg_x = frame.width - leg_w - 12
+        leg_y = frame.height - leg_h - 12
+        draw.rectangle([leg_x, leg_y, leg_x + leg_w, leg_y + leg_h], fill=(10, 16, 24, 220), outline=(80, 80, 90, 200), width=1)
+        legend_hdr = "BENCHMARK MODES" if custom_legend else "GENERATION PALETTE"
+        draw.text((leg_x + 8, leg_y + 6), legend_hdr, fill=(200, 200, 200, 255))
+
         for i, (g, lbl) in enumerate(legend_items):
             c = self._get_gen_color(g)
-            cy = leg_y + 22 + i * 14
+            cy = leg_y + 24 + i * 16
             draw.ellipse([leg_x + 10, cy, leg_x + 16, cy + 6], fill=(*c, 255))
             draw.text((leg_x + 22, cy - 2), lbl, fill=(210, 210, 210, 255))
 
@@ -201,7 +223,7 @@ class SwarmRenderer:
 
     def generate_timelapse(
         self,
-        trajectories_by_gen: Dict[int, List[List[Tuple[int, int, int, int]]]],
+        trajectories_by_gen: Dict[Any, List[List[Tuple[int, int, int, int]]]],
         output_video_path: Path,
         output_gif_path: Optional[Path] = None,
         fps: int = 15,
@@ -209,18 +231,25 @@ class SwarmRenderer:
         gif_duration_ms: int = 125,
         gif_frame_skip: int = 2,
         intro_hold_frames: int = 15,
-        outro_hold_frames: int = 30
+        outro_hold_frames: int = 30,
+        custom_palette: Optional[Dict[Any, Tuple[int, int, int]]] = None,
+        custom_title: Optional[str] = None,
+        custom_legend: Optional[List[Tuple[Any, str]]] = None,
+        group_tiles: Optional[Dict[str, int]] = None
     ):
         """
-        Renders multi-generation agent trajectories onto the canonical 32-bit GBA FireRed map.
+        Renders multi-generation or multi-condition agent trajectories onto the canonical 32-bit GBA FireRed map.
         Each agent is rendered as an authentic GBA animated walking sprite with strict
         walkable boundary enforcement, dynamic camera tracking, and research HUD.
         """
+        if custom_palette:
+            self.custom_palette = custom_palette
+
         output_video_path = Path(output_video_path)
         output_video_path.parent.mkdir(parents=True, exist_ok=True)
 
         all_agents = []
-        for gen, traj_list in sorted(trajectories_by_gen.items()):
+        for gen, traj_list in trajectories_by_gen.items():
             for a_idx, traj in enumerate(traj_list):
                 all_agents.append({
                     'gen': gen,
@@ -301,7 +330,9 @@ class SwarmRenderer:
                     agent['last_dir'] = direction
 
                     # Walk cycle: alternates 0 (step left) -> 1 (stand) -> 2 (step right) -> 1 (stand)
-                    cycle = (step + int(agent['gen'])) % 4
+                    g_val = agent['gen']
+                    g_num = g_val if isinstance(g_val, int) else (abs(hash(str(g_val))) % 100)
+                    cycle = (step + g_num) % 4
                     wf = 0 if cycle == 0 else (2 if cycle == 2 else 1)
 
                     # Trail history
@@ -328,15 +359,17 @@ class SwarmRenderer:
 
             # Calculate target camera position (focused dynamically on the exploration frontier)
             if active_heads:
-                max_active_gen = max(h['gen'] for h in active_heads)
-                frontier_heads = [h for h in active_heads if h['gen'] == max_active_gen]
-                
+                # Find the northern-most active agents (lowest py on composite canvas)
+                min_py = min(h['py'] for h in active_heads)
+                frontier_heads = [h for h in active_heads if h['py'] <= min_py + 64]
+
                 f_target_x = float(np.mean([h['px'] + 8 for h in frontier_heads]))
                 f_target_y = float(np.mean([h['py'] + 8 for h in frontier_heads]))
                 all_mean_x = float(np.mean([h['px'] + 8 for h in active_heads]))
-                
-                target_x = 0.85 * f_target_x + 0.15 * all_mean_x
-                target_y = f_target_y
+                all_mean_y = float(np.mean([h['py'] + 8 for h in active_heads]))
+
+                target_x = 0.80 * f_target_x + 0.20 * all_mean_x
+                target_y = 0.80 * f_target_y + 0.20 * all_mean_y
 
                 # Gentle, cinematic camera smoothing (eliminates rapid whip-pans)
                 cam_x = 0.94 * cam_x + 0.06 * target_x
@@ -383,9 +416,12 @@ class SwarmRenderer:
                 step_idx=step + 1,
                 total_steps=max_steps,
                 unique_tiles=len(visited_tiles),
-                max_gen=max(trajectories_by_gen.keys()) if trajectories_by_gen else 1,
+                max_gen=len(trajectories_by_gen.keys()),
                 frontier_landmark=frontier_landmark,
-                boulder_badge=boulder_badge
+                boulder_badge=boulder_badge,
+                custom_title=custom_title,
+                custom_legend=custom_legend,
+                group_tiles=group_tiles
             )
 
             # Write to video

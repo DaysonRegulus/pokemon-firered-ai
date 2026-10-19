@@ -23,6 +23,9 @@ class KantoWorldMapper:
         (3, 2): (50, 60),     # Pewter City (40x36 tiles) -> (800px, 960px)
         (6, 2): (35, 65),     # Pewter Gym Arena Interior (12x15 tiles) -> (560px, 1040px)
         (5, 1): (97, 172),    # Viridian Gym Interior (20x23 tiles) -> (1550px, 2750px)
+        (4, 3): (47, 282),    # Oak's Lab (Pallet Town inset) -> (752px, 4512px)
+        (15, 0): (68, 170),   # Route 2 South Gatehouse -> (1088px, 2720px)
+        (15, 3): (68, 118),   # Route 2 North Gatehouse -> (1088px, 1888px)
         # Mt Moon Caves (0.5x scaled, Y=100 in empty North void)
         (1, 1): (94, 6),      # Mt Moon 1F -> (1500px, 100px)
         (1, 2): (122, 6),     # Mt Moon B1F -> (1950px, 100px)
@@ -33,6 +36,9 @@ class KantoWorldMapper:
     WALKABLE_BOUNDS: Dict[Tuple[int, int], Tuple[int, int, int, int]] = {
         (4, 1): (1, 8, 1, 7),        # Hero's Bedroom: interior carpet and floor
         (4, 0): (2, 8, 2, 8),        # Hero's Living Room: living room rug and doorway
+        (4, 3): (2, 9, 1, 11),       # Oak's Lab interior
+        (15, 0): (2, 7, 1, 7),       # South Gatehouse interior
+        (15, 3): (2, 7, 1, 7),       # North Gatehouse interior
         (3, 0): (4, 15, 1, 14),      # Pallet Town: interior lawn & roads (fences & water blocked)
         (3, 19): (4, 18, 0, 47),     # Route 1: 48-tile corridor with signpost gap and winding roads
         (3, 1): (14, 27, 0, 35),     # Viridian City: town roads & plaza (boundary trees blocked)
@@ -45,11 +51,14 @@ class KantoWorldMapper:
     LANDMARK_NAMES: Dict[Tuple[int, int], str] = {
         (4, 1): "Hero's Bedroom (2F)",
         (4, 0): "Hero's Living Room (1F)",
+        (4, 3): "Oak's Pokémon Lab",
         (3, 0): "Pallet Town",
         (3, 19): "Route 1",
         (3, 1): "Viridian City",
         (3, 20): "Route 2",
+        (15, 0): "Route 2 South Gatehouse",
         (1, 0): "Viridian Forest (Interior)",
+        (15, 3): "Route 2 North Gatehouse",
         (3, 2): "Pewter City",
         (6, 2): "Pewter Gym (Brock)",
         (1, 1): "Mt. Moon 1F",

@@ -1443,5 +1443,61 @@ To address user feedback regarding rapid, unperceivable playback:
 - **HD MP4 Video**: `visual_evidence/swarm_visualizer/kanto_swarm_timelapse.mp4` (345 frames @ 15 fps, 23.0s runtime, 760x480).
 - **Master Composite Canvas**: `assets/pwhiddy/kanto_firered_composite_full.png` (Verified: 0 overworld pixels overwritten).
 
+---
+
+## Phase 22: 4-Way Multi-Curiosity Benchmark Swarm Visualizer (NONE vs SSIM vs RND vs COORD) on Real Empirical Trajectories
+**Date**: October 19, 2026  
+**Status**: COMPLETE & VERIFIED (Authentic 32-Bit GBA FireRed Avatars, Color Differentiation, Real Benchmark Data)
+
+### 1. Architectural Motivation & Research Objective
+To visually demonstrate the comparative performance and spatial divergence of distinct visual curiosity paradigms in reinforcement learning on Pokémon FireRed:
+- **`NONE` (Control Baseline)**: Extrinsic reward only. Under extreme sparsity, demonstrates pure undirected Brownian motion.
+- **`SSIM` (Structural Similarity Index Measure)**: Perceptual curiosity rewarding image structural novelty against a memory bank. Prone to micro-animation traps.
+- **`RND` (Random Network Distillation)**: Neural curiosity modeling novelty via prediction error of fixed random embeddings. Overcomes local pixel noise.
+- **`COORD` (Count-Based Coordinate Exploration)**: Micro-spatial density reward ($1/\sqrt{N}$). Maximizes unique tile coverage but exhibits the "Roomba Fallacy".
+
+### 2. Implementation of Multi-Color Swarm Palette & Official GBA Avatars
+In `src/pokefirered/visualization/swarm_renderer.py`, the rendering pipeline was extended to support arbitrary condition keys, custom color palettes, and multi-metric HUD overlays:
+- **Benchmark Color Palette**:
+  - **`NONE`**: Crimson Red `(240, 60, 60)`
+  - **`SSIM`**: Bright Orange `(255, 140, 0)`
+  - **`RND`**: Electric Cyan `(0, 210, 255)`
+  - **`COORD`**: Emerald Green `(40, 230, 60)`
+- **Dynamic Palette Remapping**:
+  The official 16-color GBA Red and Leaf character sprite sheets (`red_normal.png`, `green_normal.png`) are dynamically re-indexed:
+  $$\text{Color}_{\text{cap/jacket}} = \mathbf{C}_{\text{mode}}, \quad \text{Color}_{\text{shadow}} = 0.72 \odot \mathbf{C}_{\text{mode}}$$
+  This uniquely colors each agent's cap and jacket according to its exploration paradigm while strictly preserving original skin tones, facial features, black linework, and 3-phase walk cycles.
+
+### 3. Empirical Trajectory Extraction from Trained Checkpoints
+Using `scripts/visualize_benchmark_swarms.py`:
+- 8 parallel GBA emulator environments were stepped for each trained benchmark model (`PokemonFireRed-GBA-NONE-8env.zip`, `SSIM`, `RND`, `COORD`) under live PPO policy inference.
+- Exact real-time RAM coordinates `(map_bank, map_num, pos_x, pos_y)` were captured directly from the GBA memory bus on every step.
+- Trajectories were persisted as JSON datasets for reproducibility:
+  - `benchmark_trajectories_NONE.json`
+  - `benchmark_trajectories_SSIM.json`
+  - `benchmark_trajectories_RND.json`
+  - `benchmark_trajectories_COORD.json`
+
+### 4. Comparative Visual Findings & Behavioral Divergence
+1. **`NONE` Swarm (Crimson Red)**:
+   - High spatial confinement: Majority of agents remain trapped inside Hero's House (Living Room 1F and Bedroom 2F), pacing carpets and wall borders without finding the exit.
+2. **`SSIM` Swarm (Bright Orange)**:
+   - Moderately active inside Pallet Town; agents that reach the overworld oscillate near the flower patches and fence boundaries where visual scene changes occur.
+3. **`RND` Swarm (Electric Cyan)**:
+   - Pushes outward past interior doorways into Pallet Town overworld; agents fan out toward the north road leading toward Route 1.
+4. **`COORD` Swarm (Emerald Green)**:
+   - Highly systematic sweeping pattern: agents mow room perimeters and lawns, discovering the highest raw tile density across Pallet Town and indoor rooms (empirical verification of the Roomba Fallacy).
+
+### 5. Final Verified Artifacts
+- **Comparative Timelapse Video**: `visual_evidence/swarm_visualizer/benchmark_swarm_comparison.mp4` (240 steps @ 15 fps, 760x480).
+- **Showcase Animated GIF**: `media/benchmark_swarm_comparison.gif` and updated `media/kanto_swarm_showcase.gif` (165 frames @ 125ms/frame, 20.6s runtime).
+- **Milestone Keyframe Stills**:
+  - `benchmark_frame_000_intro.png`: Starting distribution in Hero's Bedroom 2F.
+  - `benchmark_frame_045_pallet_divergence.png`: Initial divergence as agents step down to Living Room 1F and outside.
+  - `benchmark_frame_110_route1_advance.png`: RND and COORD agents emerging onto Pallet Town overworld.
+  - `benchmark_frame_180_corridor_exploration.png`: Multi-agent dispersion between Pallet Town roads, fences, and lawns.
+  - `benchmark_frame_final_comparison.png`: Comprehensive comparative distribution showing clear spatial segregation between NONE, SSIM, RND, and COORD.
+
+
 
 
