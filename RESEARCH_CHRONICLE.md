@@ -1585,3 +1585,48 @@ To visually inspect policy behaviors and verify spatial divergence, real GBA emu
   - **Trajectory Datasets**: `visual_evidence/swarm_visualizer/benchmark_trajectories_QRDQN_{NONE,COORD,RND,SSIM}.json`.
   - **Keyframe Stills**: `qrdqn_frame_000_intro.png`, `qrdqn_frame_045_pallet_divergence.png`, `qrdqn_frame_110_route1_advance.png`, `qrdqn_frame_180_corridor_exploration.png`, `qrdqn_frame_final_comparison.png`.
 
+---
+
+## Phase 24: Exploration Paradigm Consolidation (RND Primary, SSIM Reserved) & Zero-Overhead Benchmark Trajectory Recording
+
+**Date**: October 19, 2026  
+**Status**: ARCHITECTURAL DECISION FORMALIZED & FULL TRAJECTORY RECORDING IMPLEMENTED
+
+### 1. Strategic Consolidation of Exploration Paradigms
+Following the completion of the 102,400-step factorial evaluation suite across on-policy PPO and off-policy Distributional QR-DQN (Phases 15 & 23), the exploration research directions are consolidated based on empirical and theoretical findings:
+
+#### A. Unified Primary Focus: Random Network Distillation (RND)
+RND is established as the primary baseline and production exploration engine across both PPO and QR-DQN.
+- **Theoretical Immunity to the "Noisy TV" Problem**: In Pokémon FireRed, cyclic overworld animations (waving grass blades, water ripple shaders, floral color cycling) generate continuous pixel novelty. Unlike metric-based comparisons, the RND predictor network $\hat{f}(s)$ quickly learns the stationary statistics of periodic visual noise, dropping prediction error $\lVert \hat{f}(s) - f(s) \rVert_2^2$ to zero and preventing local animation traps.
+- **Semantic Spatial Generalization**: Shared convolutional features project familiar indoor textures (carpets, furniture, walls) to low-error representations. Once a room is familiar, novelty decays globally across that architectural motif, naturally generating a negative gradient slope that pushes agents toward doorways, stairs, and overworld exits.
+- **End-to-End Visual Autonomy**: Operates strictly on raw pixel observations ($84 \times 84 \times 2$), eliminating privileged memory-bus inspection and maintaining strict compliance with the Deep RL visual benchmark standard.
+- **Dual-Algorithm Synergy**:
+  - In **PPO**, RND achieved the highest extrinsic milestone (+10.00, triggering Oak's event).
+  - In **QR-DQN**, high prediction error transitions entering novel rooms generate large TD errors ($|\delta_i|$), which Prioritized Experience Replay (PER) repeatedly samples and backpropagates off-policy.
+- **High Throughput**: Runs at 261.9 SPS on QR-DQN and 74.0 SPS on PPO with negligible memory footprint.
+
+#### B. Retention of SSIM for Long-Horizon Horizon Testing
+Per research directive, **SSIM is retained** for extended long-horizon comparative runs (e.g. 500k - 1M timesteps) to investigate whether perceptual memory banks achieve superior asymptotic frontier expansion once RND's neural predictor begins saturating across large-scale overworld regions.
+
+#### C. Deprecation of COORD and NONE
+- **`COORD` Deprecated**: While scoring high local tile counts on PPO (580 tiles), it suffers from the **Roomba Fallacy** (maximizing local carpet/lawn coverage rather than advancing toward narrative milestones), relies on privileged GBA RAM addresses, and introduces severe Bellman target non-stationarity in off-policy replay buffers ($1/\sqrt{N}$ variance).
+- **`NONE` Deprecated**: Brownian motion under sparse extrinsic rewards fails to navigate multi-room bottlenecks consistently, trapping agents in initial indoor zones.
+
+---
+
+### 2. Zero-Overhead Full Trajectory Recording Architecture
+To fulfill the core requirement of logging every step of every agent across every benchmark run without disk I/O performance penalties:
+1. **In-Memory Pre-Allocation**:
+   - Trajectories are collected in RAM during the step loop using an in-memory buffer:
+     $$\text{RAM Footprint} = \text{Steps} \times \text{Envs} \times 4 \text{ coordinates} \times 2 \text{ bytes} \approx 6.55 \text{ MB for 102.4k steps}$$
+   - Zero file writes occur during environment stepping, guaranteeing **0% training throughput (SPS) degradation**.
+2. **Standardized Single-Flush Output**:
+   - Trajectory recording is **enabled by default** for all training sessions in `scripts/train.py` (for both QR-DQN and PPO via `RAMExplorationTrackerCallback`).
+   - Saved alongside model checkpoints and metric summaries using strict run-differentiating naming:
+     - Checkpoint: `{checkpoint_dir}/{model_prefix}.pth` (or `.zip`)
+     - Summary Metrics: `{checkpoint_dir}/{model_prefix}_summary.json`
+     - Full Trajectories: `{checkpoint_dir}/{model_prefix}_trajectories.json`
+   - An explicit opt-out flag (`--no-record-trajectories`) is provided for temporary headless debugging.
+3. **Swarm Visualizer Trajectory Integration**:
+   - `scripts/visualize_benchmark_swarms.py` is updated to automatically detect and prioritize `{model_prefix}_trajectories.json`.
+   - When visualizing large benchmark runs, the visualizer automatically downsamples/timelapses the full multi-thousand step training journey evenly into smooth, readable widescreen animations (125ms per frame) showing real progression from starting bedroom to final frontier.

@@ -132,6 +132,7 @@ def main():
     parser.add_argument("--algo", type=str, default="QRDQN", choices=["PPO", "QRDQN"], help="Algorithm to visualize (default: QRDQN)")
     parser.add_argument("--steps", type=int, default=240, help="Steps per agent (default: 240)")
     parser.add_argument("--num-agents", type=int, default=8, help="Number of agents per condition (default: 8)")
+    parser.add_argument("--force-rollout", action="store_true", help="Force new evaluation rollout instead of loading saved training trajectories")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Inference device")
     args = parser.parse_args()
 
@@ -170,8 +171,28 @@ def main():
 
     for mode, model_path in models_dict.items():
         cache_file = output_dir / f"benchmark_trajectories_{algo}_{mode}.json"
-        
-        if cache_file.exists():
+        checkpoint_dir = model_path.parent
+        train_traj_file = checkpoint_dir / f"{model_path.stem}_trajectories.json"
+
+        # 1. Prioritize official recorded training trajectories from the benchmark run
+        if train_traj_file.exists() and not args.force_rollout:
+            print(f"\n[BENCHMARK TRAJECTORY] Loading recorded training trajectories for {mode} from {train_traj_file.name}...")
+            with open(train_traj_file, "r", encoding="utf-8") as f:
+                raw_trajs = json.load(f)
+
+            trajectories_by_mode[mode] = []
+            for agent_traj in raw_trajs[:num_agents_per_mode]:
+                if len(agent_traj) > steps_per_agent:
+                    # Stride evenly across the full 102.4k training history for cinematic timelapse
+                    stride = len(agent_traj) / steps_per_agent
+                    sampled = [agent_traj[int(i * stride)] for i in range(steps_per_agent)]
+                    trajectories_by_mode[mode].append([(pt[0], pt[1], pt[2], pt[3]) for pt in sampled])
+                else:
+                    trajectories_by_mode[mode].append([(pt[0], pt[1], pt[2], pt[3]) for pt in agent_traj])
+            total_logged_pts = len(raw_trajs[0]) * len(raw_trajs)
+            print(f"  Loaded {len(trajectories_by_mode[mode])} agents (timelapsed from {total_logged_pts:,} training steps into {steps_per_agent} visual frames).")
+
+        elif cache_file.exists() and not args.force_rollout:
             print(f"\n[CACHE] Loading real cached trajectories for {mode} from {cache_file.name}...")
             with open(cache_file, "r") as f:
                 data = json.load(f)

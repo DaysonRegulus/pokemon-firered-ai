@@ -317,28 +317,42 @@ class CoordinateExplorationCallback(BaseCallback):
 
 class RAMExplorationTrackerCallback(BaseCallback):
     """
-    Ground-truth learning verification callback.
+    Ground-truth learning verification and full trajectory recording callback.
     Monitors player's (Map, X, Y) coordinates directly from GBA RAM.
-    Tracks cumulative unique tiles, unique maps, and exploration novelty rate.
+    Tracks cumulative unique tiles, unique maps, exploration novelty rate,
+    and logs step-by-step per-agent coordinates in-memory with zero I/O overhead.
     """
-    def __init__(self, verbose=0):
+    def __init__(self, record_trajectories: bool = True, num_envs: int = 8, verbose: int = 0):
         super().__init__(verbose)
+        self.record_trajectories = record_trajectories
+        self.num_envs = num_envs
         self.global_visited_tiles = set()
         self.global_visited_maps = set()
         self.recent_discoveries = deque(maxlen=500)
         self.last_total_tiles = 0
+        self.agent_trajectories = [[] for _ in range(num_envs)] if record_trajectories else []
 
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
-        for info in infos:
+        for i, info in enumerate(infos):
             if "pos_x" in info and "pos_y" in info and "map_bank" in info:
-                tile = (info["map_bank"], info["map_num"], info["pos_x"], info["pos_y"])
-                map_id = (info["map_bank"], info["map_num"])
+                raw_x = int(info["pos_x"])
+                raw_y = int(info["pos_y"])
+                mb = int(info["map_bank"])
+                mn = int(info["map_num"])
+                x = max(0, raw_x - 7) if raw_x >= 7 else raw_x
+                y = max(0, raw_y - 7) if raw_y >= 7 else raw_y
+
+                tile = (mb, mn, raw_x, raw_y)
+                map_id = (mb, mn)
 
                 is_new = tile not in self.global_visited_tiles
                 self.global_visited_tiles.add(tile)
                 self.global_visited_maps.add(map_id)
                 self.recent_discoveries.append(1 if is_new else 0)
+
+                if self.record_trajectories and i < len(self.agent_trajectories):
+                    self.agent_trajectories[i].append((mb, mn, x, y))
 
         total_tiles = len(self.global_visited_tiles)
         total_maps = len(self.global_visited_maps)
@@ -353,6 +367,16 @@ class RAMExplorationTrackerCallback(BaseCallback):
             self.last_total_tiles = total_tiles
 
         return True
+
+    def save_trajectories(self, save_path: Path):
+        """Flushes recorded in-memory trajectories to disk in JSON format."""
+        if not self.record_trajectories or not self.agent_trajectories:
+            return
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(self.agent_trajectories, f)
+        print(f"Full per-agent coordinate trajectories saved to: {save_path}")
 
 
 class PeriodicVisualEvalCallback(BaseCallback):

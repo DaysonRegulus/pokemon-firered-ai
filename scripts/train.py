@@ -69,6 +69,13 @@ def parse_args():
     parser.add_argument("--visual-eval", action="store_true", help="Enable periodic evaluation GIF recordings")
     parser.add_argument("--eval-freq", type=int, default=20480, help="Timestep frequency for periodic visual evaluations")
     parser.add_argument("--eval-steps", type=int, default=400, help="Maximum steps per visual evaluation episode")
+    parser.add_argument(
+        "--no-record-trajectories",
+        action="store_false",
+        dest="record_trajectories",
+        default=True,
+        help="Disable full step-by-step per-agent coordinate trajectory recording (recording is ENABLED by default)",
+    )
     parser.add_argument("--fresh", action="store_true", help="Force train from scratch, ignoring existing checkpoints")
     return parser.parse_args()
 
@@ -119,6 +126,7 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     total_intrinsic = 0.0
 
     rnd_rollout_buffer = [] if rnd_module is not None else None
+    agent_trajectories = [[] for _ in range(args.num_envs)] if args.record_trajectories else []
 
     obs = vec_env.reset()
     start_time = time.time()
@@ -171,9 +179,19 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
             # Ground-truth RAM coordinates tracking
             info = infos[i]
             if "pos_x" in info and "pos_y" in info and "map_bank" in info:
-                tile = (info["map_bank"], info["map_num"], info["pos_x"], info["pos_y"])
+                raw_x = int(info["pos_x"])
+                raw_y = int(info["pos_y"])
+                mb = int(info["map_bank"])
+                mn = int(info["map_num"])
+                x = max(0, raw_x - 7) if raw_x >= 7 else raw_x
+                y = max(0, raw_y - 7) if raw_y >= 7 else raw_y
+
+                tile = (mb, mn, raw_x, raw_y)
                 visited_tiles.add(tile)
-                visited_maps.add((info["map_bank"], info["map_num"]))
+                visited_maps.add((mb, mn))
+
+                if args.record_trajectories and i < len(agent_trajectories):
+                    agent_trajectories[i].append((mb, mn, x, y))
 
             total_extrinsic += r_ext
             total_intrinsic += r_int
@@ -237,6 +255,12 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     with open(summary_file, "w") as f:
         json.dump(summary_data, f, indent=2)
     print(f"Summary metrics saved to {summary_file}")
+
+    if args.record_trajectories and agent_trajectories:
+        traj_file = checkpoint_dir / f"{model_path.stem}_trajectories.json"
+        with open(traj_file, "w", encoding="utf-8") as f:
+            json.dump(agent_trajectories, f)
+        print(f"Full per-agent coordinate trajectories saved to: {traj_file}")
 
 
 def main():
@@ -324,7 +348,10 @@ def main():
 
         reward_callback = RewardTrackingCallback(intrinsic_callbacks=intrinsic_cbs)
         logging_callback = ComprehensiveLoggingCallback()
-        exploration_tracker = RAMExplorationTrackerCallback()
+        exploration_tracker = RAMExplorationTrackerCallback(
+            record_trajectories=args.record_trajectories,
+            num_envs=args.num_envs,
+        )
         callbacks = [logging_callback, exploration_tracker] + intrinsic_cbs + [reward_callback]
 
         if args.visual_eval:
@@ -375,6 +402,10 @@ def main():
         summary_file = checkpoint_dir / f"{model_path.stem}_summary.json"
         with open(summary_file, "w") as f:
             json.dump(summary_data, f, indent=2)
+
+        if args.record_trajectories:
+            traj_file = checkpoint_dir / f"{model_path.stem}_trajectories.json"
+            exploration_tracker.save_trajectories(traj_file)
 
         model.save(str(model_path))
         if rnd_module is not None: rnd_module.save(str(rnd_path))
