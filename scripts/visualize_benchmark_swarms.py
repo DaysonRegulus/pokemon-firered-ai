@@ -1,6 +1,6 @@
 """
 Benchmark Exploration Swarm Visualizer (NONE vs SSIM vs RND vs COORD).
-Rolls out the 4 trained benchmark policies (or loads cached real trajectories),
+Rolls out the 4 trained benchmark policies for either PPO or QR-DQN (+ PER),
 compositing authentic 32-bit GBA Pokémon FireRed/LeafGreen player avatars
 differentiated by colors:
   - NONE (Control): Crimson Red (240, 60, 60)
@@ -9,6 +9,7 @@ differentiated by colors:
   - COORD (Spatial): Emerald Green (40, 230, 60)
 Displays real-time side-by-side exploration divergence across Kanto.
 """
+import argparse
 import sys
 import json
 import time
@@ -23,6 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from pokefirered.env_factory import register_custom_integrations, create_vectorized_env
 from pokefirered.visualization import KantoWorldMapper, SwarmRenderer
+from pokefirered.models import QRDQNAgent
 
 BENCHMARK_PALETTE = {
     "NONE": (240, 60, 60),     # Crimson Red (Control Baseline)
@@ -31,19 +33,32 @@ BENCHMARK_PALETTE = {
     "COORD": (40, 230, 60),   # Emerald Green (Count-based Spatial Curiosity)
 }
 
-BENCHMARK_MODELS = {
+BENCHMARK_MODELS_PPO = {
     "NONE": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-NONE-8env.zip",
     "SSIM": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-SSIM-8env.zip",
     "RND": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-RND-8env.zip",
     "COORD": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-COORD-8env.zip",
 }
 
-# Empirical benchmark discovery metrics from 102,400 step benchmark
-BENCHMARK_METRICS = {
+BENCHMARK_METRICS_PPO = {
     "NONE": {"tiles": 422, "maps": 5, "desc": "Control (422 tiles)"},
     "SSIM": {"tiles": 414, "maps": 5, "desc": "Perceptual (414 tiles)"},
     "RND": {"tiles": 368, "maps": 4, "desc": "Neural RND (368 tiles)"},
     "COORD": {"tiles": 580, "maps": 6, "desc": "Spatial (580 tiles)"},
+}
+
+BENCHMARK_MODELS_QRDQN = {
+    "NONE": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-QRDQN-NONE-8env.pth",
+    "SSIM": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-QRDQN-SSIM-8env.pth",
+    "RND": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-QRDQN-RND-8env.pth",
+    "COORD": PROJECT_ROOT / "checkpoints" / "benchmark_pure" / "PokemonFireRed-GBA-QRDQN-COORD-8env.pth",
+}
+
+BENCHMARK_METRICS_QRDQN = {
+    "NONE": {"tiles": 357, "maps": 5, "desc": "Control (357 tiles)"},
+    "COORD": {"tiles": 393, "maps": 4, "desc": "Spatial (393 tiles)"},
+    "RND": {"tiles": 429, "maps": 5, "desc": "Neural RND (429 tiles)"},
+    "SSIM": {"tiles": 478, "maps": 4, "desc": "Perceptual (478 tiles)"},
 }
 
 BASE_RAM = 0x02000000
@@ -51,25 +66,40 @@ BASE_RAM = 0x02000000
 
 def collect_real_policy_trajectories(
     model_path: Path,
+    algo: str = "QRDQN",
     num_agents: int = 8,
     steps_per_agent: int = 240,
     device: str = "cpu"
 ) -> List[List[Tuple[int, int, int, int]]]:
     """
-    Executes trained PPO policy in parallel GBA emulators, recording
+    Executes trained policy in parallel GBA emulators, recording
     ground-truth (bank, num, x, y) coordinates from RAM at every step.
     """
-    print(f"  [ROLLOUT] Initializing {num_agents} GBA emulators for {model_path.name}...")
+    print(f"  [ROLLOUT] Initializing {num_agents} GBA emulators for {model_path.name} ({algo})...")
     env = create_vectorized_env("PokemonFireRed-GBA", num_envs=num_agents, n_stack=2, exploration_mode="NONE")
     obs = env.reset()
 
-    model = PPO.load(str(model_path), env=env, device=device)
+    if algo == "PPO":
+        model = PPO.load(str(model_path), env=env, device=device)
+        agent = None
+    else:
+        agent = QRDQNAgent(
+            in_channels=env.observation_space.shape[0],
+            num_actions=env.action_space.n,
+            device=device,
+        )
+        agent.load(model_path)
+        model = None
+
     trajectories = [[] for _ in range(num_agents)]
     visited_tiles = set()
 
     t0 = time.time()
     for step in range(steps_per_agent):
-        actions, _ = model.predict(obs, deterministic=False)
+        if algo == "PPO":
+            actions, _ = model.predict(obs, deterministic=False)
+        else:
+            actions = agent.select_actions(obs, epsilon=0.05)
         obs, rewards, dones, infos = env.step(actions)
 
         # Extract real coordinates from infos / RAM
@@ -98,10 +128,18 @@ def collect_real_policy_trajectories(
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Benchmark Exploration Swarm Visualizer")
+    parser.add_argument("--algo", type=str, default="QRDQN", choices=["PPO", "QRDQN"], help="Algorithm to visualize (default: QRDQN)")
+    parser.add_argument("--steps", type=int, default=240, help="Steps per agent (default: 240)")
+    parser.add_argument("--num-agents", type=int, default=8, help="Number of agents per condition (default: 8)")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Inference device")
+    args = parser.parse_args()
+
     register_custom_integrations()
 
+    algo = args.algo.upper()
     print("=" * 80)
-    print(" POKÉMON FIRERED GBA: 4-WAY BENCHMARK EXPLORATION SWARM VISUALIZER")
+    print(f" POKÉMON FIRERED GBA: 4-WAY {algo} EXPLORATION SWARM VISUALIZER")
     print(" Comparing: NONE vs SSIM vs RND vs COORD")
     print(" Differentiated by Authentic Tinted GBA Avatars & Real Trajectories")
     print("=" * 80)
@@ -111,16 +149,27 @@ def main():
     media_dir = PROJECT_ROOT / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
 
-    video_path = output_dir / "benchmark_swarm_comparison.mp4"
-    gif_path = media_dir / "benchmark_swarm_comparison.gif"
-    showcase_gif = media_dir / "kanto_swarm_showcase.gif"
+    if algo == "QRDQN":
+        models_dict = BENCHMARK_MODELS_QRDQN
+        metrics_dict = BENCHMARK_METRICS_QRDQN
+        video_path = output_dir / "qrdqn_swarm_comparison.mp4"
+        gif_path = media_dir / "qrdqn_swarm_comparison.gif"
+        showcase_gif = media_dir / "kanto_swarm_showcase.gif"
+        title_prefix = "POKEMON FIRERED: QR-DQN (+ PER) BENCHMARK SWARM"
+    else:
+        models_dict = BENCHMARK_MODELS_PPO
+        metrics_dict = BENCHMARK_METRICS_PPO
+        video_path = output_dir / "benchmark_swarm_comparison.mp4"
+        gif_path = media_dir / "benchmark_swarm_comparison.gif"
+        showcase_gif = media_dir / "kanto_swarm_showcase.gif"
+        title_prefix = "POKEMON FIRERED: PPO BENCHMARK SWARM"
 
-    num_agents_per_mode = 8
-    steps_per_agent = 240
+    num_agents_per_mode = args.num_agents
+    steps_per_agent = args.steps
     trajectories_by_mode: Dict[str, List[List[Tuple[int, int, int, int]]]] = {}
 
-    for mode, model_path in BENCHMARK_MODELS.items():
-        cache_file = output_dir / f"benchmark_trajectories_{mode}.json"
+    for mode, model_path in models_dict.items():
+        cache_file = output_dir / f"benchmark_trajectories_{algo}_{mode}.json"
         
         if cache_file.exists():
             print(f"\n[CACHE] Loading real cached trajectories for {mode} from {cache_file.name}...")
@@ -137,9 +186,10 @@ def main():
                 raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
             trajs = collect_real_policy_trajectories(
                 model_path=model_path,
+                algo=algo,
                 num_agents=num_agents_per_mode,
                 steps_per_agent=steps_per_agent,
-                device="cpu"
+                device=args.device,
             )
             trajectories_by_mode[mode] = trajs
 
@@ -150,21 +200,21 @@ def main():
 
     # Build multi-condition legend and tiles dictionary
     custom_legend = [
-        ("NONE", "NONE: Control (422)"),
-        ("SSIM", "SSIM: Perceptual (414)"),
-        ("RND", "RND: Neural (368)"),
-        ("COORD", "COORD: Spatial (580)"),
+        ("NONE", f"NONE: Control ({metrics_dict['NONE']['tiles']})"),
+        ("COORD", f"COORD: Spatial ({metrics_dict['COORD']['tiles']})"),
+        ("RND", f"RND: Neural ({metrics_dict['RND']['tiles']})"),
+        ("SSIM", f"SSIM: Perceptual ({metrics_dict['SSIM']['tiles']})"),
     ]
     group_tiles = {
-        "NONE": BENCHMARK_METRICS["NONE"]["tiles"],
-        "SSIM": BENCHMARK_METRICS["SSIM"]["tiles"],
-        "RND": BENCHMARK_METRICS["RND"]["tiles"],
-        "COORD": BENCHMARK_METRICS["COORD"]["tiles"],
+        "NONE": metrics_dict["NONE"]["tiles"],
+        "COORD": metrics_dict["COORD"]["tiles"],
+        "RND": metrics_dict["RND"]["tiles"],
+        "SSIM": metrics_dict["SSIM"]["tiles"],
     }
 
     # Render Swarm Visualization
     print("\n" + "=" * 80)
-    print(" RENDERING 4-WAY COMPARATIVE SWARM ANIMATION")
+    print(f" RENDERING 4-WAY COMPARATIVE SWARM ANIMATION ({algo})")
     print(f" Video Output: {video_path}")
     print(f" GIF Output:   {gif_path}")
     print(" Viewport:     760x480 (Widescreen)")
@@ -183,7 +233,7 @@ def main():
         intro_hold_frames=15,
         outro_hold_frames=30,
         custom_palette=BENCHMARK_PALETTE,
-        custom_title="POKEMON FIRERED: 4-WAY BENCHMARK SWARM",
+        custom_title=title_prefix,
         custom_legend=custom_legend,
         group_tiles=group_tiles
     )
@@ -206,11 +256,11 @@ def main():
         total_frames - 1                     # Final comparative frontier
     ]
     keyframe_names = [
-        "benchmark_frame_000_intro.png",
-        "benchmark_frame_045_pallet_divergence.png",
-        "benchmark_frame_110_route1_advance.png",
-        "benchmark_frame_180_corridor_exploration.png",
-        "benchmark_frame_final_comparison.png",
+        f"{algo.lower()}_frame_000_intro.png",
+        f"{algo.lower()}_frame_045_pallet_divergence.png",
+        f"{algo.lower()}_frame_110_route1_advance.png",
+        f"{algo.lower()}_frame_180_corridor_exploration.png",
+        f"{algo.lower()}_frame_final_comparison.png",
     ]
 
     for k_idx, k_name in zip(keyframe_indices, keyframe_names):
@@ -223,7 +273,7 @@ def main():
     cap.release()
 
     print("\n" + "=" * 80)
-    print(" 4-WAY BENCHMARK SWARM VISUALIZATION EXPORT COMPLETE!")
+    print(f" 4-WAY {algo} BENCHMARK SWARM VISUALIZATION EXPORT COMPLETE!")
     print(f" Video Path : {video_path}")
     print(f" GIF Path   : {gif_path}")
     print(f" Keyframes  : {output_dir}")

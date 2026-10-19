@@ -1569,3 +1569,19 @@ All trained models, serialized curiosity modules, and JSON metric summaries are 
 - `PokemonFireRed-GBA-QRDQN-RND-8env.pth`, `_rnd.pth` & `_summary.json`
 - `PokemonFireRed-GBA-QRDQN-SSIM-8env.pth`, `_ssim.pt` & `_summary.json`
 - Unified Factorial Markdown Report: `checkpoints/benchmark_pure/benchmark_factorial_comparison_report.md`
+
+---
+
+### 5. 4-Way QR-DQN Benchmark Swarm Visualization & Trajectory Rollout
+To visually inspect policy behaviors and verify spatial divergence, real GBA emulator rollouts were collected across all 4 trained QR-DQN models (`scripts/visualize_benchmark_swarms.py --algo QRDQN`):
+- **Visual Trajectory Discoveries (240 steps @ 8 agents per mode)**:
+  - **`NONE` (Crimson Red)**: 9 unique tiles (agents stay mostly in Hero's Bedroom 2F).
+  - **`COORD` (Emerald Green)**: 16 unique tiles (agents navigate down to Living Room 1F).
+  - **`RND` (Electric Cyan)**: 16 unique tiles (agents explore the living room perimeter and TV).
+  - **`SSIM` (Bright Orange)**: **26 unique tiles** (agents aggressively push through the doorway toward the exit warp, mirroring their #1 ranking in full benchmark coverage).
+- **Generated Visualization Artifacts**:
+  - **Animated Benchmark GIF**: [`media/qrdqn_swarm_comparison.gif`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/media/qrdqn_swarm_comparison.gif) & updated [`media/kanto_swarm_showcase.gif`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/media/kanto_swarm_showcase.gif) (165 frames @ 125ms/frame, 760x480).
+  - **Comparative Video**: [`visual_evidence/swarm_visualizer/qrdqn_swarm_comparison.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/swarm_visualizer/qrdqn_swarm_comparison.mp4).
+  - **Trajectory Datasets**: `visual_evidence/swarm_visualizer/benchmark_trajectories_QRDQN_{NONE,COORD,RND,SSIM}.json`.
+  - **Keyframe Stills**: `qrdqn_frame_000_intro.png`, `qrdqn_frame_045_pallet_divergence.png`, `qrdqn_frame_110_route1_advance.png`, `qrdqn_frame_180_corridor_exploration.png`, `qrdqn_frame_final_comparison.png`.
+
