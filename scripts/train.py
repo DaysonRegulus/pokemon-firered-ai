@@ -403,14 +403,17 @@ def main():
         with open(summary_file, "w") as f:
             json.dump(summary_data, f, indent=2)
 
-        if args.record_trajectories:
-            traj_file = checkpoint_dir / f"{model_path.stem}_trajectories.json"
-            exploration_tracker.save_trajectories(traj_file)
-
         model.save(str(model_path))
         if rnd_module is not None: rnd_module.save(str(rnd_path))
         if ssim_module is not None: ssim_module.save(str(ssim_path))
         if coord_module is not None: coord_module.save(str(coord_path))
+
+        if args.record_trajectories:
+            traj_file = checkpoint_dir / f"{model_path.stem}_trajectories.json"
+            try:
+                exploration_tracker.save_trajectories(traj_file)
+            except Exception as e:
+                print(f"[WARN] Failed to save trajectories: {e}")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Saving current weights...")
