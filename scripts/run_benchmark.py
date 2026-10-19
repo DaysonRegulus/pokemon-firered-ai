@@ -151,6 +151,15 @@ def main():
 
     print(f"\nReport written to: {report_file}\n")
 
+    # If 12-env benchmark, trigger 12-env swarm visualizer
+    if args.num_envs == 12:
+        viz_script = PROJECT_ROOT / "scripts" / "visualize_12env_comparison.py"
+        if viz_script.exists():
+            print("\n" + "=" * 80)
+            print(" AUTO-LAUNCHING 12-ENV SWARM VISUALIZATION PIPELINE")
+            print("=" * 80)
+            subprocess.run([python_exe, str(viz_script), "--checkpoint-dir", str(args.checkpoint_dir)], cwd=str(PROJECT_ROOT))
+
 
 if __name__ == "__main__":
     main()
