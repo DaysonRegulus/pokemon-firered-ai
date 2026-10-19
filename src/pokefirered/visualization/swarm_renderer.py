@@ -42,21 +42,25 @@ class SwarmRenderer:
             assets_dir = project_root / "assets" / "pwhiddy"
         self.assets_dir = Path(assets_dir)
 
-        kanto_path = self.assets_dir / "kanto_firered_clean.png"
+        kanto_path = self.assets_dir / "kanto_firered_composite_full.png"
+        if not kanto_path.exists():
+            kanto_path = self.assets_dir / "kanto_firered_clean.png"
+
         red_path = self.assets_dir / "red_normal.png"
         green_path = self.assets_dir / "green_normal.png"
 
         if not kanto_path.exists() or not red_path.exists():
             raise FileNotFoundError(f"Missing required FireRed GBA assets in {self.assets_dir}")
 
-        # Load canonical FireRed overworld map
-        print(f"[SWARM RENDERER] Loading 32-bit GBA FireRed overworld map: {kanto_path.name}...")
+        # Load canonical FireRed overworld & interior composite map
+        print(f"[SWARM RENDERER] Loading 32-bit GBA FireRed composite map: {kanto_path.name}...")
         self.kanto_img = Image.open(kanto_path).convert("RGBA")
-        # Seamlessly replace unmapped white void pixels with authentic GBA forest canopy green
-        arr = np.array(self.kanto_img)
-        white_mask = (arr[:, :, 0] > 245) & (arr[:, :, 1] > 245) & (arr[:, :, 2] > 245)
-        arr[white_mask] = [56, 88, 16, 255]
-        self.kanto_img = Image.fromarray(arr)
+        if kanto_path.name != "kanto_firered_composite_full.png":
+            # Seamlessly replace unmapped white void pixels with authentic GBA forest canopy green
+            arr = np.array(self.kanto_img)
+            white_mask = (arr[:, :, 0] > 245) & (arr[:, :, 1] > 245) & (arr[:, :, 2] > 245)
+            arr[white_mask] = [56, 88, 16, 255]
+            self.kanto_img = Image.fromarray(arr)
         self.map_w, self.map_h = self.kanto_img.size
 
         # Load official GBA player sprite sheets (indexed 16-color)
@@ -219,7 +223,20 @@ class SwarmRenderer:
         max_steps = max(len(a['traj']) for a in all_agents) if all_agents else 0
         print(f"[SWARM RENDERER] Total GBA agents: {len(all_agents)} | Max steps: {max_steps}")
 
+        LANDMARK_RANKS = [
+            ("Pallet Town", 0, "Pallet Town"),
+            ("Hero's House", 0, "Pallet Town (Home)"),
+            ("Route 1", 1, "Route 1"),
+            ("Viridian City", 2, "Viridian City"),
+            ("Route 2", 3, "Route 2"),
+            ("Forest", 4, "Viridian Forest"),
+            ("Pewter City", 5, "Pewter City"),
+            ("Gym", 6, "Pewter Gym (Brock)"),
+            ("Brock", 6, "Pewter Gym (Brock)"),
+            ("Mt. Moon", 7, "Mt. Moon"),
+        ]
         visited_tiles = set()
+        max_rank = 0
         frontier_landmark = "Pallet Town"
         boulder_badge = False
 
@@ -244,19 +261,14 @@ class SwarmRenderer:
                     visited_tiles.add((bank, num, x, y))
                     px, py = self.mapper.to_global_pixel_coords(bank, num, x, y)
 
-                    # Update frontier landmark
+                    # Update frontier landmark monotonically based on highest milestone reached
                     name = self.mapper.get_landmark_name(bank, num)
-                    if "Gym" in name or "Brock" in name:
-                        boulder_badge = True
-                        frontier_landmark = "Pewter Gym (Brock)"
-                    elif "Pewter" in name and "Gym" not in frontier_landmark:
-                        frontier_landmark = "Pewter City"
-                    elif "Forest" in name and "Pewter" not in frontier_landmark:
-                        frontier_landmark = "Viridian Forest"
-                    elif "Viridian" in name and "Forest" not in frontier_landmark:
-                        frontier_landmark = "Viridian City"
-                    elif "Route 1" in name and "Viridian" not in frontier_landmark:
-                        frontier_landmark = "Route 1"
+                    for key, r, display_name in LANDMARK_RANKS:
+                        if key in name and r > max_rank:
+                            max_rank = r
+                            frontier_landmark = display_name
+                            if r >= 6:
+                                boulder_badge = True
 
                     # Calculate movement direction
                     if step > 0 and step - 1 < len(traj):
