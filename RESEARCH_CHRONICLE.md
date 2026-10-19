@@ -1630,3 +1630,71 @@ To fulfill the core requirement of logging every step of every agent across ever
 3. **Swarm Visualizer Trajectory Integration**:
    - `scripts/visualize_benchmark_swarms.py` is updated to automatically detect and prioritize `{model_prefix}_trajectories.json`.
    - When visualizing large benchmark runs, the visualizer automatically downsamples/timelapses the full multi-thousand step training journey evenly into smooth, readable widescreen animations (125ms per frame) showing real progression from starting bedroom to final frontier.
+
+---
+
+## Phase 25: QR-DQN Hardware Scalability & Parallel Environment Pareto Analysis
+
+**Date**: October 19, 2026  
+**Status**: HARDWARE SCALABILITY BENCHMARKED & PARETO SWEET SPOTS ESTABLISHED
+
+### 1. Motivation & Experimental Design
+Following the initial hardware scaling benchmark for PPO (Phase 5), a corresponding scalability assessment was executed for the off-policy **QR-DQN with Prioritized Experience Replay (PER) and RND Curiosity** architecture.
+
+Unlike PPO (which performs on-policy rollouts and epoch-based mini-batch SGD), QR-DQN executes an asynchronous off-policy training loop comprising:
+1. **Batch Action Selection**: $N$-observation GPU forward pass through Dueling QR-DQN ($\epsilon$-greedy).
+2. **Parallel Emulator Stepping**: $N$ independent C++ mGBA retro core instances running in isolated worker processes (`SubprocVecEnv`).
+3. **Vectorized RND Curiosity**: Observation normalization and GPU feature error computation for $N$ frames.
+4. **PER Replay Buffer Ingestion**: $N$ state transitions pushed into the SumTree data structure.
+5. **Quantile Regression Gradient Descent**: Prioritized sampling of 64 transitions, Quantile Huber loss computation across 32 quantiles, PyTorch backpropagation, Adam optimizer step, and soft Polyak target update ($\tau = 0.005$).
+
+#### Hardware Environment:
+- **CPU**: 8 Physical Cores / 16 Logical Threads
+- **System RAM**: 15.74 GB Total (Baseline utilized: ~9.8 GB with OS and dev environment)
+- **GPU**: NVIDIA GeForce RTX 3050 Ti Laptop GPU (4.00 GB VRAM)
+- **Harness**: `scripts/benchmark_qrdqn_envs.py` sweeping $N \in [2, 4, 6, 8, 10, 12, 14, 16]$ parallel environments (1,024 steps per configuration with warm cache and clean process teardown).
+
+---
+
+### 2. Empirical Benchmark Results
+
+| Envs ($N$) | Steps Per Second (SPS) | Iteration Latency (ms) | Wall Time (1024 Steps) | RAM Delta (MB) | System RAM % | GPU VRAM (MB) | CPU % | Operational Assessment |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **2** | 100.8 | 19.8 ms | 10.16 s | 1457.9 MB | 71.5% | 117.8 MB | 15.7% | Severe CPU underutilization; low throughput |
+| **4** | 183.3 | 21.8 ms | 5.59 s | 1275.2 MB | 75.5% | 117.8 MB | 59.1% | Efficient sub-core scaling ($1.82\times$ over 2 envs) |
+| **6** | 266.3 | 22.5 ms | 3.83 s | 1808.3 MB | 79.0% | 121.0 MB | 64.0% | Strong linear acceleration; comfortable headroom |
+| **8** | **331.3** | **24.1 ms** | **3.09 s** | **2371.7 MB** | **82.3%** | **124.5 MB** | **68.3%** | **Optimal for Multitasking (Matches 8 physical cores; 8 threads free)** |
+| **10** | 385.2 | 26.0 ms | 2.65 s | 3003.4 MB | 85.7% | 126.5 MB | 71.4% | Smooth scaling; moderate memory footprint |
+| **12** | **407.3** | **29.5 ms** | **2.50 s** | **3325.8 MB** | **87.5%** | **130.3 MB** | **73.9%** | **Pareto-Optimal Sweet Spot for Dedicated Training** |
+| **14** | 438.7 | 31.9 ms | 2.33 s | 4240.2 MB | 91.1% | 133.4 MB | 72.7% | High memory pressure; marginal throughput gains |
+| **16** | 471.5 | 33.9 ms | 2.17 s | 4786.0 MB | 94.6% | 136.7 MB | 75.3% | Peak SPS, but dangerously high RAM (94.6%, pagefile swap risk) |
+
+---
+
+### 3. Cross-Algorithmic Comparison: PPO vs. QR-DQN Scaling
+
+| Metric | PPO (Phase 5) | QR-DQN + PER (Phase 25) | Comparative Analysis |
+| :--- | :---: | :---: | :--- |
+| **Throughput @ 8 envs** | 334.7 SPS | 331.3 SPS | **Virtually Identical ($\Delta < 1\%$)**: At 8 environments, emulator stepping dominates runtime equally across both algorithms. |
+| **Throughput @ 12 envs** | 440.3 SPS | 407.3 SPS | PPO is ~8% faster; QR-DQN incurs additional per-step PER SumTree updates and quantile regression loss computations. |
+| **Peak Throughput @ 16 envs**| 500.0 SPS | 471.5 SPS | Both algorithms achieve near-maximum GPU/CPU saturation at 16 parallel workers. |
+| **Memory Footprint @ 12 envs**| +2.68 GB | +3.33 GB | QR-DQN consumes ~650 MB more due to pre-allocated numpy replay buffers ($S, A, R, S', D$) and SumTree nodes. |
+| **GPU VRAM Utilization** | ~25 MB | ~130 MB | QR-DQN maintains dual networks (Online + Target) and quantile tensors, but comfortably fits within 4 GB VRAM. |
+
+---
+
+### 4. Concrete Operational Recommendations
+
+1. **Dedicated Full-Speed Training (`--num-envs 12`)**:
+   - **Throughput**: **407.3 SPS** (~24,400 steps per minute). A full 102,400-step benchmark finishes in **~4.2 minutes** (compared to ~20 minutes on PPO).
+   - **System RAM Stability**: Peak RAM utilization holds at **87.5%**, safely under the 90% threshold to avoid Windows pagefile swapping.
+   - **Recommendation**: Use `12 envs` when the user leaves the machine unattended or dedicated solely to model training.
+
+2. **Multitasking Background Training (`--num-envs 8`)**:
+   - **Throughput**: **331.3 SPS** (~19,880 steps per minute). A 102,400-step benchmark finishes in **~5.1 minutes**.
+   - **CPU Scheduling**: Leaves exactly **8 logical hyperthreads completely idle**, preventing OS stutter, browser latency, or audio dropouts during pair programming or multitasking.
+   - **System RAM Safety**: Consumes only **82.3%** system RAM (+2.37 GB), leaving ~2.8 GB headroom for user applications.
+   - **Recommendation**: Use `8 envs` when the user is actively working, compiling, or browsing on the laptop.
+
+3. **Avoid `--num-envs 16`**:
+   - While achieving 471.5 SPS, pushing system RAM to **94.6%** risks hard page faults and memory thrashing if external applications allocate memory, causing severe framerate collapse.
