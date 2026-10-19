@@ -45,8 +45,11 @@ def parse_args():
 def main():
     args = parse_args()
     model_path = Path(args.model_path)
-    if not model_path.exists() and model_path.with_suffix(".zip").exists():
-        model_path = model_path.with_suffix(".zip")
+    if not model_path.exists():
+        if model_path.with_suffix(".pth").exists():
+            model_path = model_path.with_suffix(".pth")
+        elif model_path.with_suffix(".zip").exists():
+            model_path = model_path.with_suffix(".zip")
 
     if not model_path.exists():
         print(f"Error: Model not found at '{model_path}'")
@@ -54,6 +57,7 @@ def main():
 
     render_mode = "human" if args.render_mode == "human" else None
     model_name = model_path.stem
+    is_qrdqn = model_path.suffix == ".pth" or "QRDQN" in model_path.name
 
     if args.output_gif is None:
         gif_dir = PROJECT_ROOT / "eval_recordings"
@@ -71,7 +75,7 @@ def main():
         keyframes_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
-    print(f" Visually Inspecting Policy: {model_name}")
+    print(f" Visually Inspecting Policy: {model_name} ({'QR-DQN' if is_qrdqn else 'PPO'})")
     print(f" Model Path:      {model_path}")
     print(f" Device:          {args.device} | Episodes: {args.episodes} | Max Steps: {args.max_steps}")
     print(f" Deterministic:   {args.deterministic}")
@@ -88,7 +92,18 @@ def main():
     )
 
     print(f"Loading weights from {model_path}...")
-    model = PPO.load(str(model_path), env=env, device=args.device)
+    if is_qrdqn:
+        from pokefirered.models import QRDQNAgent
+        agent = QRDQNAgent(
+            in_channels=env.observation_space.shape[0],
+            num_actions=env.action_space.n,
+            device=args.device,
+        )
+        agent.load(model_path)
+        model = None
+    else:
+        model = PPO.load(str(model_path), env=env, device=args.device)
+        agent = None
 
     all_episode_summaries = []
 
@@ -116,7 +131,11 @@ def main():
                 if args.record_gif:
                     recorded_frames.append(raw_screen)
 
-                action, _states = model.predict(obs, deterministic=args.deterministic)
+                if is_qrdqn:
+                    act = agent.select_action(obs[0], epsilon=0.0 if args.deterministic else 0.05)
+                    action = [act]
+                else:
+                    action, _states = model.predict(obs, deterministic=args.deterministic)
                 obs, reward, dones, infos = env.step(action)
                 info = infos[0]
 
