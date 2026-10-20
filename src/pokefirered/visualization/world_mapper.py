@@ -12,8 +12,8 @@ class KantoWorldMapper:
     # Mapping from GBA (bank, map_idx) to kanto_firered_composite_full tile coordinates [X, Y]
     CANONICAL_OFFSETS: Dict[Tuple[int, int], Tuple[int, int]] = {
         # Hero's House Interiors (Pallet Town insets)
-        (4, 1): (47, 262),    # Hero's House 2F Bedroom (10x9 tiles) -> (752px, 4192px)
-        (4, 0): (47, 272),    # Hero's House 1F Living Room (10x9 tiles) -> (752px, 4352px)
+        (4, 0): (47, 272),    # Hero's House 2F Bedroom (10x9 tiles) -> (752px, 4352px)
+        (4, 1): (47, 262),    # Hero's House 1F Living Room (10x9 tiles) -> (752px, 4192px)
         # Overworld Routes & Cities (West Kanto Progression Corridor)
         (3, 0): (62, 262),    # Pallet Town (20x18 tiles) -> (992px, 4192px)
         (3, 19): (62, 214),   # Route 1 (20x48 tiles) -> (992px, 3424px)
@@ -32,25 +32,45 @@ class KantoWorldMapper:
         (1, 3): (150, 6),     # Mt Moon B2F -> (2400px, 100px)
     }
 
-    # Walkable tile bounds [min_x, max_x, min_y, max_y] per map to eliminate out-of-bounds drift
+    # Authentic physical map tile dimensions [min_x, max_x, min_y, max_y] per map
+    MAP_DIMENSIONS: Dict[Tuple[int, int], Tuple[int, int, int, int]] = {
+        (4, 0): (0, 9, 0, 8),        # Hero's House 2F Bedroom: 10x9
+        (4, 1): (0, 9, 0, 8),        # Hero's House 1F Living Room: 10x9
+        (4, 3): (0, 11, 0, 11),      # Oak's Lab interior: 12x12
+        (15, 0): (0, 9, 0, 7),       # Route 2 South Gatehouse: 10x8
+        (15, 3): (0, 9, 0, 7),       # Route 2 North Gatehouse: 10x8
+        (3, 0): (0, 19, 0, 17),      # Pallet Town: 20x18
+        (3, 19): (0, 19, 0, 47),     # Route 1: 20x48
+        (3, 1): (0, 39, 0, 35),      # Viridian City: 40x36
+        (3, 20): (0, 19, 0, 59),     # Route 2: 20x60
+        (1, 0): (0, 53, 0, 63),      # Viridian Forest: 54x64
+        (3, 2): (0, 39, 0, 35),      # Pewter City: 40x36
+        (6, 2): (0, 11, 0, 14),      # Pewter Gym: 12x15
+        (5, 1): (0, 19, 0, 22),      # Viridian Gym: 20x23
+        (1, 1): (0, 49, 0, 39),      # Mt Moon 1F: 50x40
+        (1, 2): (0, 49, 0, 39),      # Mt Moon B1F: 50x40
+        (1, 3): (0, 49, 0, 39),      # Mt Moon B2F: 50x40
+    }
+
+    # Walkable tile bounds [min_x, max_x, min_y, max_y]
     WALKABLE_BOUNDS: Dict[Tuple[int, int], Tuple[int, int, int, int]] = {
-        (4, 1): (1, 8, 1, 7),        # Hero's Bedroom: interior carpet and floor
-        (4, 0): (2, 8, 2, 8),        # Hero's Living Room: living room rug and doorway
+        (4, 0): (1, 8, 1, 7),        # Hero's Bedroom: interior carpet and floor
+        (4, 1): (2, 8, 2, 8),        # Hero's Living Room: living room rug and doorway
         (4, 3): (2, 9, 1, 11),       # Oak's Lab interior
         (15, 0): (2, 7, 1, 7),       # South Gatehouse interior
         (15, 3): (2, 7, 1, 7),       # North Gatehouse interior
-        (3, 0): (4, 15, 1, 14),      # Pallet Town: interior lawn & roads (fences & water blocked)
-        (3, 19): (4, 18, 0, 47),     # Route 1: 48-tile corridor with signpost gap and winding roads
-        (3, 1): (14, 27, 0, 35),     # Viridian City: town roads & plaza (boundary trees blocked)
-        (3, 20): (9, 12, 0, 59),     # Route 2: path between gatehouses (side forest blocked)
-        (1, 0): (3, 50, 8, 62),      # Viridian Forest: actual winding path (south entrance to north exit)
-        (3, 2): (12, 24, 16, 35),    # Pewter City: south road & gym square
-        (6, 2): (3, 9, 5, 13),       # Pewter Gym: arena floor leading to Brock
+        (3, 0): (0, 19, 0, 17),      # Pallet Town
+        (3, 19): (0, 19, 0, 47),     # Route 1
+        (3, 1): (0, 39, 0, 35),      # Viridian City
+        (3, 20): (0, 19, 0, 59),     # Route 2
+        (1, 0): (0, 53, 0, 63),      # Viridian Forest
+        (3, 2): (0, 39, 0, 35),      # Pewter City
+        (6, 2): (0, 11, 0, 14),      # Pewter Gym
     }
 
     LANDMARK_NAMES: Dict[Tuple[int, int], str] = {
-        (4, 1): "Hero's Bedroom (2F)",
-        (4, 0): "Hero's Living Room (1F)",
+        (4, 0): "Hero's Bedroom (2F)",
+        (4, 1): "Hero's Living Room (1F)",
         (4, 3): "Oak's Pokémon Lab",
         (3, 0): "Pallet Town",
         (3, 19): "Route 1",
@@ -71,9 +91,9 @@ class KantoWorldMapper:
 
     def get_walkable_x_bounds(self, bank: int, num: int, y: int) -> Tuple[int, int]:
         """Returns exact (min_x, max_x) walkable range for a given map and y coordinate."""
-        if (bank, num) == (4, 1):
+        if (bank, num) == (4, 0):
             return 1, 8
-        elif (bank, num) == (4, 0):
+        elif (bank, num) == (4, 1):
             return 2, 8
         elif (bank, num) == (3, 0):
             # Pallet Town
@@ -119,19 +139,32 @@ class KantoWorldMapper:
             return self.WALKABLE_BOUNDS[(bank, num)][0], self.WALKABLE_BOUNDS[(bank, num)][1]
         return 0, 40
 
-    def clamp_to_walkable(self, bank: int, num: int, x: int, y: int) -> Tuple[int, int]:
-        """Clamps coordinate to strictly walkable within-bounds tiles using piecewise map geometry."""
-        if (bank, num) in self.WALKABLE_BOUNDS:
-            _, _, min_y, max_y = self.WALKABLE_BOUNDS[(bank, num)]
-            clamped_y = max(min_y, min(max_y, y))
-            min_x, max_x = self.get_walkable_x_bounds(bank, num, clamped_y)
-            clamped_x = max(min_x, min(max_x, x))
-            return clamped_x, clamped_y
-        return x, y
+    def clamp_to_walkable(self, bank: int, num: int, x: int, y: int, strict_corridor: bool = False) -> Tuple[int, int]:
+        """
+        Clamps coordinate to map bounds.
+        If strict_corridor is False (default), clamps to the map's authentic physical tile boundaries (0 <= x <= max_x, 0 <= y <= max_y),
+        preserving authentic GBA exploration on grass, side roads, and open areas without synthetic warping.
+        If strict_corridor is True, clamps to narrow corridor pathways.
+        """
+        if strict_corridor:
+            if (bank, num) in self.WALKABLE_BOUNDS:
+                _, _, min_y, max_y = self.WALKABLE_BOUNDS[(bank, num)]
+                clamped_y = max(min_y, min(max_y, y))
+                min_x, max_x = self.get_walkable_x_bounds(bank, num, clamped_y)
+                clamped_x = max(min_x, min(max_x, x))
+                return clamped_x, clamped_y
+        else:
+            bounds = self.MAP_DIMENSIONS.get((bank, num), self.WALKABLE_BOUNDS.get((bank, num)))
+            if bounds:
+                min_x, max_x, min_y, max_y = bounds
+                clamped_x = max(min_x, min(max_x, x))
+                clamped_y = max(min_y, min(max_y, y))
+                return clamped_x, clamped_y
+        return max(0, x), max(0, y)
 
     def is_walkable(self, bank: int, num: int, x: int, y: int) -> bool:
         """Returns True if (x, y) is on a strictly walkable tile within the map corridor."""
-        cx, cy = self.clamp_to_walkable(bank, num, x, y)
+        cx, cy = self.clamp_to_walkable(bank, num, x, y, strict_corridor=True)
         return (cx == x and cy == y)
 
     def get_map_scale(self, bank: int, num: int) -> float:
@@ -142,9 +175,9 @@ class KantoWorldMapper:
             return 0.5
         return 1.0
 
-    def to_global_pixel_coords(self, bank: int, num: int, x: int, y: int) -> Tuple[int, int]:
+    def to_global_pixel_coords(self, bank: int, num: int, x: int, y: int, clamp: bool = True) -> Tuple[int, int]:
         """Returns global pixel (px, py) on kanto_firered_composite_full.png."""
-        cx, cy = self.clamp_to_walkable(bank, num, x, y)
+        cx, cy = self.clamp_to_walkable(bank, num, x, y) if clamp else (x, y)
         if (bank, num) == (1, 0):
             # Viridian Forest interior is resized 0.75x to fit zero-collision slot at (1392, 1750)
             # 1 local tile = 16 * 0.75 = 12 pixels
