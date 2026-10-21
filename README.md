@@ -301,18 +301,19 @@ Empirical proof and keyframe captures are documented in [visual_evidence/](visua
 
 ## 📜 Chronological Changelog
 
-- **v1.0.0** — *Foundation & Curiosity Benchmarks*:
-  - Vectorized multi-processing environment engine (`stable-retro`).
-  - Implemented RND, SSIM, and COORD curiosity modules with hybrid ensemble support.
-  - Resolved GBA DMA pointer shifting with static EWRAM memory hooks.
-- **v1.5.0** — *Distributional RL & Visual Swarm Tracking*:
-  - Added Quantile Regression DQN (QR-DQN) agent with Prioritized Experience Replay (PER).
-  - Built Peter Whidden-style multi-agent animated swarm renderer with authentic GBA Red/Leaf walking sprites.
-  - Trajectory recording pipeline saving full per-agent coordinate histories to JSON.
-- **v2.0.0** — *PokéRL Studio & Unified World Topology*:
-  - Developed **PokéRL Studio** desktop application (PySide6) with 6 dedicated views, 60 FPS emulator integration, and real-time live Matplotlib charts.
-  - Redesigned mapping architecture around `WorldTopology`, achieving 100% seamless, mathematically verified zero-drift overworld transitions.
-  - Packaged standalone desktop executable (`PokeRL_Studio.exe`) via PyInstaller with Windows multiprocessing support.
+A comprehensive, commit-by-commit historical changelog reconstructed from the repository's Git timeline across all branches is maintained in [CHANGELOG.md](CHANGELOG.md).
+
+### Key Architectural Milestones
+
+- **`v1.0.0` — Linux Working Release** (`2025-07-02`):
+  Initial functional release establishing reproducible environment setup on Linux/WSL2 (`setup.txt`), training runner (`FireRedRender.py`), RAM reward manager, and verified gameplay demonstration (`demo1.gif`).
+- **`v2.0.0` — Windows Platform Creation** (`2026-10-14`):
+  Ground-up transition to Windows-native execution, featuring precompiled `stable-retro` integration, GPU-accelerated PPO, Random Network Distillation (RND) curiosity, and the modular `src/pokefirered/` package architecture.
+- **`v2.0.23` — PokéRL Studio & Unified World Topology (Current)** (`2026-10-21`):
+  Integrated **PokéRL Studio** desktop mission-control suite (PySide6) with 6 dedicated views, 60 FPS emulator integration, live Matplotlib curves, standalone binary packaging (`PokeRL_Studio.exe`), and the continuous `WorldTopology` manifold engine with mathematically verified zero-drift overworld transitions.
+
+> [!NOTE]
+> For the complete entry-by-entry historical ledger documenting all 43 commits, research milestones, and technical change categories, see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
