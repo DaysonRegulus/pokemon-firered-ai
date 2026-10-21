@@ -5,8 +5,9 @@ from stable_baselines3.common.atari_wrappers import WarpFrame
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecTransposeImage
 
 from pokefirered.wrappers import ActionFilterWrapper, CustomRewardEnv, StochasticFrameSkip
+from pokefirered.paths import get_project_root
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = get_project_root()
 CUSTOM_INTEGRATION_DIR = PROJECT_ROOT / "data" / "custom_integrations"
 
 

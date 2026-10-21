@@ -1,9 +1,10 @@
 # Pokémon FireRed AI Agent 🎮🤖
 
-An advanced Reinforcement Learning framework and research testbed for **Pokémon FireRed (Game Boy Advance)** using **Stable-Baselines3 (PPO)**, emulator RAM telemetry, and multi-paradigm curiosity-driven exploration.
+An advanced Reinforcement Learning framework and research testbed for **Pokémon FireRed (Game Boy Advance)** using **Stable-Baselines3 (PPO)**, **Distributional QR-DQN**, emulator RAM telemetry, multi-paradigm curiosity-driven exploration, and the **PokéRL Studio** desktop application.
 
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
-[![Framework: Stable-Baselines3](https://img.shields.io/badge/framework-Stable--Baselines3-orange.svg)](https://github.com/DLR-RM/stable-baselines3)
+[![Framework: Stable-Baselines3 & PyTorch](https://img.shields.io/badge/framework-SB3%20%7C%20PyTorch-orange.svg)](https://github.com/DLR-RM/stable-baselines3)
+[![GUI: PySide6](https://img.shields.io/badge/GUI-PySide6%20%28Qt6%29-brightgreen.svg)]()
 [![Platform: Windows & Linux](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -33,14 +34,33 @@ This repository serves as an empirical research platform comparing intrinsic cur
 4. **Hybrid Ensembles**:
    - Arbitrary runtime composition: `RND+COORD`, `SSIM+COORD`, `RND+SSIM`, `RND+SSIM+COORD`.
 
+### Reinforcement Learning Algorithms
+- **Proximal Policy Optimization (PPO)**: On-policy actor-critic utilizing clipped surrogate objective, Generalized Advantage Estimation (GAE), and entropy regularization for stable continuous exploration.
+- **Quantile Regression DQN (QR-DQN)**: Off-policy distributional value-based RL with Prioritized Experience Replay (PER), Huber quantile loss, and target network synchronization for discrete action selection under stochastic dynamics.
+
 > [!NOTE]
 > For in-depth research chronicles, mathematical formulations, empirical benchmarks, and DMA memory invariance proofs, see [RESEARCH_CHRONICLE.md](RESEARCH_CHRONICLE.md).
 
 ---
 
+## ⚡ PokéRL Studio Desktop Suite
+
+**PokéRL Studio** is an integrated desktop GUI application built with **PySide6 (Qt 6.12)** providing mission-control monitoring, interactive gameplay, live analytical plotting, and multi-agent swarm rendering:
+
+- ⚡ **Dashboard**: Linear milestone progression tracker (`[Pallet Town] ➔ [Route 1] ➔ [Viridian City] ➔ [Route 2] ➔ [Viridian Forest] ➔ [Pewter City] ➔ [Brock]`), dual 60 FPS viewports (pixel-perfect GBA display + 1:1 Kanto Swarm tracker), and live KPI cards.
+- 🎮 **Play & Calibrate**: Interactive keyboard/virtual D-Pad controls, trajectory scrubbing slider for stepping through past runs, live $\pm 1$ tile offset calibration, and 1-click verification snapshots.
+- 🚀 **Training Studio**: GUI orchestrator for launching PPO & QR-DQN runs with curiosity mode selection, parallel environment configuration, live progress bars, and autoscrolling terminal logs.
+- 📈 **Analytics & Live Curves**: 4 real-time Matplotlib plots (Rewards Progression, Exploration Frontier, Loss Dynamics, SPS Throughput) and automated historical benchmark matrices parsed from checkpoints.
+- 🗺️ **Swarm Studio**: Peter Whidden-style multi-agent video (`.mp4`) and animated GIF (`.gif`) compilation compositing authentic GBA Red/Leaf walking sprites onto the overworld canvas.
+- ⚙️ **Diagnostics**: Hardware detection, PyTorch CUDA acceleration checks, GBA ROM hash integrity validation, and asset health tables.
+
+**Standalone Executable:** Available pre-compiled in `dist/PokeRL_Studio/PokeRL_Studio.exe` or runnable directly from source via `python main_gui.py`.
+
+---
+
 ## 🌿 Repository Branch Structure
 
-- **`master`** (Current): The modernized, modular v2 engine. Features cross-platform Windows native and Linux support, vectorized multi-processing, memory-invariant RAM wrappers, plug-and-play curiosity modules, and automated evaluation suites.
+- **`master`** (Current): The modernized, modular v2 engine. Features cross-platform Windows native and Linux support, vectorized multi-processing, memory-invariant RAM wrappers, plug-and-play curiosity modules, PokéRL Studio desktop GUI, and automated evaluation suites.
 - **`legacy-linux`**: The historical baseline repository branch containing the original Linux/WSL2 monolithic training scripts (`FireRedRender.py`, `FireRedRewardManager.py`) and legacy model checkpoints.
 
 ---
@@ -50,6 +70,8 @@ This repository serves as an empirical research platform comparing intrinsic cur
 ```
 Pokemon FireRed AI/
 ├── .venv/                              # Python 3.10 virtual environment
+├── assets/
+│   └── pwhiddy/                        # 32-bit GBA composite overworld map & player sprites
 ├── data/
 │   └── custom_integrations/
 │       └── PokemonFireRed-GBA/         # Integration metadata, rom.sha, custom save states
@@ -62,20 +84,39 @@ Pokemon FireRed AI/
 ├── src/
 │   └── pokefirered/
 │       ├── __init__.py
-│       ├── env_factory.py              # Vectorized environment factory
+│       ├── paths.py                    # Dual development & frozen bundle path resolution
+│       ├── env_factory.py              # Vectorized environment factory & retro registration
 │       ├── wrappers.py                 # Action filtering (12->6 buttons), frame skipping, rewards
 │       ├── rewards.py                  # Direct RAM inspection, HP/level tracking, faint multipliers
 │       ├── rnd.py                      # Random Network Distillation (RND) neural architecture
 │       ├── ssim_module.py              # GPU-accelerated SSIM perceptual curiosity module
 │       ├── coord_module.py             # Ground-truth count-based coordinate novelty module
 │       ├── callbacks.py                # Telemetry, speed (SPS), faint, and action distribution logging
-│       └── keyboard_input.py           # Cross-platform non-blocking keyboard controller
+│       ├── keyboard_input.py           # Cross-platform non-blocking keyboard controller
+│       ├── models/
+│       │   ├── qrdqn.py                # Quantile Regression DQN (QR-DQN) agent
+│       │   └── replay_buffer.py        # Prioritized Experience Replay (PER) buffer
+│       ├── visualization/
+│       │   ├── topology.py             # Unified mathematical world manifold & map descriptors
+│       │   ├── world_mapper.py         # 1:1 Kanto coordinate transformation engine
+│       │   └── swarm_renderer.py       # Peter Whidden-style multi-agent video & GIF compiler
+│       └── gui/
+│           ├── theme.py                # Modern obsidian slate dark QSS stylesheet
+│           ├── main_window.py          # Master sidebar window & view coordinator
+│           ├── widgets/                # PixelScreenWidget, MetricCard, LiveMetricChart
+│           ├── workers/                # EmulatorWorker (60 FPS) & TrainWorker (subprocess)
+│           └── views/                  # Dashboard, Play, Train, Charts, Swarm, Settings
 ├── scripts/
 │   ├── train.py                        # Unified training pipeline with dynamic curriculum & CLI
 │   ├── evaluate.py                     # Rendered policy evaluation & GIF recording
+│   ├── evaluate_qrdqn.py               # Evaluation script for trained QR-DQN checkpoints
 │   ├── benchmark_envs.py               # Hardware scalability & throughput benchmarking
-│   └── play_manual.py                  # Real-time manual playtest tool (WASD + Z/X)
+│   ├── benchmark_qrdqn_envs.py         # QR-DQN parallel throughput benchmarking
+│   ├── generate_swarm_animation.py     # Standalone swarm animation script
+│   └── play_manual.py                  # Real-time manual playtest & trajectory replay tool
 ├── visual_evidence/                    # Empirical keyframes verifying DMA coordinate invariance
+├── main_gui.py                         # Desktop application launcher
+├── PokeRL_Studio.spec                  # PyInstaller standalone executable specification
 ├── RESEARCH_CHRONICLE.md               # Append-only empirical research document
 ├── requirements.txt                    # Project dependencies
 └── README.md
@@ -110,9 +151,23 @@ pip install -r requirements.txt
 
 ---
 
-### 2. Manual Playtesting (RAM & Control Verification)
+### 2. Launching PokéRL Studio (Desktop GUI)
 
-Verify your ROM integration, action bindings, and real-time RAM reward triggers with keyboard controls:
+Run the unified desktop application from source or launch the compiled standalone executable:
+
+```powershell
+# Option A: Run from Python virtual environment
+python main_gui.py
+
+# Option B: Run the standalone compiled binary
+.\dist\PokeRL_Studio\PokeRL_Studio.exe
+```
+
+---
+
+### 3. Manual Playtesting & Verification
+
+Verify ROM integration, action bindings, real-time RAM coordinates, and 1:1 map alignment with interactive keyboard controls:
 
 ```powershell
 python scripts/play_manual.py
@@ -122,11 +177,19 @@ python scripts/play_manual.py
 - `W` / `A` / `S` / `D` : Move (Up / Left / Down / Right)
 - `Z` : B Button (Run / Cancel / Fast Text)
 - `X` : A Button (Confirm / Interact)
-- `Q` : Quit
+- `[` / `]` : Real-time Tile X Offset Adjustment (-1 / +1)
+- `;` / `'` : Real-time Tile Y Offset Adjustment (-1 / +1)
+- `P` : Capture Side-by-Side Verification Snapshot
+- `Q` / `ESC` : Quit & Save Trajectory
+
+**Trajectory Replay Mode:**
+```powershell
+python scripts/play_manual.py --replay-trajectory checkpoints/Pokemon_PPO_RND_8env_trajectories.json
+```
 
 ---
 
-### 3. Hardware Scalability Benchmarking
+### 4. Hardware Scalability Benchmarking
 
 Measure throughput (Steps Per Second - SPS) and RAM footprint across varying parallel environments:
 
@@ -141,49 +204,72 @@ python scripts/benchmark_envs.py --envs 2 4 8 12 16 --steps 1024
 
 ---
 
-### 4. Training the Agent
+### 5. Training the Agent
 
-Launch PPO training with your chosen curiosity exploration paradigm:
+Launch training with either **PPO** or **QR-DQN** across your chosen curiosity exploration paradigm:
 
 ```powershell
-# 1. Pure Coordinate Novelty Exploration (Ground-Truth Spatial Frequency)
-python scripts/train.py --num-envs 8 --exploration COORD --beta-coord 0.05
+# 1. PPO with Random Network Distillation (RND Neural Curiosity)
+python scripts/train.py --algo PPO --num-envs 8 --exploration RND --rnd-beta 0.05 --timesteps 102400
 
-# 2. Pure Random Network Distillation (RND Neural Curiosity)
-python scripts/train.py --num-envs 8 --exploration RND --beta-rnd 1.0
+# 2. PPO with Structural Similarity (SSIM Perceptual Curiosity)
+python scripts/train.py --algo PPO --num-envs 8 --exploration SSIM --ssim-beta 0.05 --timesteps 102400
 
-# 3. Pure Structural Similarity (SSIM Perceptual Frame Novelty)
-python scripts/train.py --num-envs 8 --exploration SSIM --beta-ssim 0.5
+# 3. PPO with Ground-Truth Coordinate Novelty (COORD)
+python scripts/train.py --algo PPO --num-envs 8 --exploration COORD --coord-beta 0.05 --timesteps 102400
 
-# 4. Multi-Method Hybrid (Neural RND + Ground-Truth Spatial Coordinates)
-python scripts/train.py --num-envs 8 --exploration RND+COORD --beta-rnd 1.0 --beta-coord 0.05
+# 4. PPO with Multi-Method Hybrid (RND + Spatial Coordinates)
+python scripts/train.py --algo PPO --num-envs 12 --exploration RND+COORD --rnd-beta 0.05 --coord-beta 0.05
 
-# 5. Baseline (Extrinsic Game Rewards Only - Leveling & Battle)
-python scripts/train.py --num-envs 8 --exploration NONE
+# 5. Distributional QR-DQN with Prioritized Experience Replay (PER) & RND
+python scripts/train.py --algo QRDQN --num-envs 8 --exploration RND --timesteps 102400
+
+# 6. Baseline (Extrinsic Game Rewards Only - Leveling & Battle)
+python scripts/train.py --algo PPO --num-envs 8 --exploration NONE
 ```
 
-**Optional Training Flags:**
-- `--visual-eval`: Periodically spawns an isolated evaluation environment and writes out gameplay GIFs to `eval_recordings/`.
-- `--eval-freq <STEPS>`: Interval of environment steps between visual evaluation recordings (default: 20480).
-- `--total-timesteps <N>`: Explicitly set training duration (defaults to automatic curriculum scaling).
+**Common Training Flags:**
+- `--algo <PPO|QRDQN>`: Choose between on-policy PPO and off-policy QR-DQN.
+- `--num-envs <N>`: Parallel vectorized emulator instances (recommended: 8 or 12).
+- `--exploration <MODE>`: `RND`, `SSIM`, `COORD`, `RND+COORD`, `SSIM+COORD`, `RND+SSIM`, `RND+SSIM+COORD`, or `NONE`.
+- `--fresh`: Reset model weights and train from scratch.
+- `--visual-eval`: Periodically execute evaluation episodes and save animated GIFs to `eval_recordings/`.
+- `--device <auto|cuda|cpu>`: Hardware device selection (defaults to auto-detected CUDA).
 
 ---
 
-### 5. Evaluating Checkpoints & Recording Play
+### 6. Multi-Agent Swarm Visualization
+
+Render Peter Whidden-style swarm videos compositing authentic GBA Red/Leaf walking sprites onto the continuous Kanto overworld map:
+
+```powershell
+python scripts/generate_swarm_animation.py \
+  --trajectories checkpoints/Pokemon_PPO_RND_8env_trajectories.json \
+  --output-video visual_evidence/swarm_renders/swarm_run.mp4 \
+  --output-gif visual_evidence/swarm_renders/swarm_run.gif \
+  --fps 30
+```
+
+---
+
+### 7. Evaluating Checkpoints & Recording Play
 
 Render a trained agent in real-time or export policy recordings:
 
 ```powershell
-# Human rendered interactive window
-python scripts/evaluate.py --model-path checkpoints/PokemonFireRed-GBA-COORD-8env.zip --render-mode human
+# Interactive human evaluation window (PPO)
+python scripts/evaluate.py --model-path checkpoints/PokemonFireRed-GBA-PPO-RND-8env.zip --render-mode human
+
+# Interactive evaluation for QR-DQN
+python scripts/evaluate_qrdqn.py --model-path checkpoints/PokemonFireRed-GBA-QRDQN-RND-8env.pth --render-mode human
 
 # Headless evaluation with GIF recording
-python scripts/evaluate.py --model-path checkpoints/PokemonFireRed-GBA-RND+COORD-8env.zip --record-gif --output-gif eval_demo.gif
+python scripts/evaluate.py --model-path checkpoints/PokemonFireRed-GBA-PPO-RND-8env.zip --record-gif --output-gif eval_demo.gif
 ```
 
 ---
 
-### 6. Live Telemetry with TensorBoard
+### 8. Live Telemetry with TensorBoard
 
 Monitor learning rate, value loss, policy entropy, intrinsic curiosity loss, coordinates discovered, and opponent faints:
 
@@ -193,8 +279,9 @@ tensorboard --logdir ./logs --host 0.0.0.0 --port 6006
 
 ---
 
-## 🧩 Technical Details: GBA DMA Memory Invariance
+## 🧩 Technical Details
 
+### 1. GBA DMA Memory Invariance
 Prior approaches to GBA RAM hacking suffered from dynamic memory allocation (DMA), where pointers inside `SaveBlock1` and `SaveBlock2` shift across gameplay sessions. 
 
 Our engine interfaces directly with static engine addresses in overworld VRAM/EWRAM:
@@ -202,7 +289,30 @@ Our engine interfaces directly with static engine addresses in overworld VRAM/EW
 - **`gObjectEvents[0]` (`0x02036E48`)**: Player avatar overworld event object containing local map coordinates $(x, y)$ at byte offsets `+0x10` and `+0x12`.
 - **Warp Invariance**: Verified across transitions: Pallet Town 1F Living Room `(14, 14)` $\rightarrow$ Exit Door Mat `(11, 15)` $\rightarrow$ Pallet Town Overworld `(10, 6)`.
 
+### 2. Unified Topological World Manifold (`WorldTopology`)
+To eliminate coordinate jumps, warping, and artificial clamping across map transitions, the tracking architecture uses a continuous piecewise-linear overworld manifold:
+- **Zero-Discontinuity Transitions**: Boundary transitions satisfy $\Delta X = 0.00, \Delta Y = 0.00$ mathematically across Pallet Town $\leftrightarrow$ Route 1 $\leftrightarrow$ Viridian City $\leftrightarrow$ Route 2 $\leftrightarrow$ Pewter City $\leftrightarrow$ Route 3.
+- **Multi-Tier Classification**: Formally distinguishes `OVERWORLD`, `INTERIOR_ROOM`, and `DUNGEON` maps. Interior rooms (Hero's Bedroom, Oak's Lab, Pewter Gym) are anchored to their parent overworld entrance doors, eliminating cross-map camera whipping while allowing high-resolution local room inspection.
+- **Non-Invasive Telemetry**: Avoids synthetic coordinate clamping, faithfully rendering true positions governed by GBA collision physics.
+
 Empirical proof and keyframe captures are documented in [visual_evidence/](visual_evidence/) and [RESEARCH_CHRONICLE.md](RESEARCH_CHRONICLE.md).
+
+---
+
+## 📜 Chronological Changelog
+
+- **v1.0.0** — *Foundation & Curiosity Benchmarks*:
+  - Vectorized multi-processing environment engine (`stable-retro`).
+  - Implemented RND, SSIM, and COORD curiosity modules with hybrid ensemble support.
+  - Resolved GBA DMA pointer shifting with static EWRAM memory hooks.
+- **v1.5.0** — *Distributional RL & Visual Swarm Tracking*:
+  - Added Quantile Regression DQN (QR-DQN) agent with Prioritized Experience Replay (PER).
+  - Built Peter Whidden-style multi-agent animated swarm renderer with authentic GBA Red/Leaf walking sprites.
+  - Trajectory recording pipeline saving full per-agent coordinate histories to JSON.
+- **v2.0.0** — *PokéRL Studio & Unified World Topology*:
+  - Developed **PokéRL Studio** desktop application (PySide6) with 6 dedicated views, 60 FPS emulator integration, and real-time live Matplotlib charts.
+  - Redesigned mapping architecture around `WorldTopology`, achieving 100% seamless, mathematically verified zero-drift overworld transitions.
+  - Packaged standalone desktop executable (`PokeRL_Studio.exe`) via PyInstaller with Windows multiprocessing support.
 
 ---
 

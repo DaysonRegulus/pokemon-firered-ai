@@ -10,6 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw
+from pokefirered.paths import get_project_root
 from .world_mapper import KantoWorldMapper
 
 class SwarmRenderer:
@@ -38,7 +39,7 @@ class SwarmRenderer:
         
         # Locate assets
         if assets_dir is None:
-            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            project_root = get_project_root()
             assets_dir = project_root / "assets" / "pwhiddy"
         self.assets_dir = Path(assets_dir)
 

@@ -23,3 +23,7 @@ psutil==7.2.2
 gputil==1.4.0
 matplotlib==3.10.9
 pandas==2.3.3
+
+# Desktop GUI & Standalone Packaging
+PySide6==6.12.0
+pyinstaller==6.22.3

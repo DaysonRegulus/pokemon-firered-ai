@@ -45,3 +45,8 @@ eval_recordings/
 Thumbs.db
 scratch/
 
+# Temporary visual debug captures & user report crops
+visual_evidence/manual_verification/
+visual_evidence/user_reports/
+visual_evidence/user_screens/
+

@@ -264,6 +264,8 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
 
 
 def main():
+    import multiprocessing
+    multiprocessing.freeze_support()
     args = parse_args()
     checkpoint_dir = PROJECT_ROOT / args.checkpoint_dir
     log_dir = PROJECT_ROOT / args.log_dir
