@@ -398,11 +398,6 @@ def main():
                 state["last_completed_generation"] = gen
                 save_state(state_file, state)
                 generate_report(checkpoint_dir, state["history"], state)
-                try:
-                    from scripts.update_chronicle import auto_update_chronicle
-                    auto_update_chronicle(commit=False, verbose=True)
-                except Exception as e_chron:
-                    print(f"[WARN] Failed to auto-update chronicle: {e_chron}")
             else:
                 print(f"[ERROR] Expected summary file {summary_ppo} not found!")
                 sys.exit(1)
