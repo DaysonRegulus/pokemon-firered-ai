@@ -406,8 +406,16 @@ def main():
         # Phase 3: Visual Swarm Rendering & Timeline Stitching
         # -------------------------------------------------------------
         if not args.no_render:
-            print(f"\n>>> [GEN {gen}] RENDERING SWARM VISUALIZATIONS (QR-DQN vs PPO)...")
-            gen_video = render_generation_swarm(checkpoint_dir, visual_dir, gen, num_envs=args.num_envs)
+            gen_mp4 = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.mp4"
+            gen_gif = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.gif"
+
+            if gen_mp4.exists() and gen_gif.exists():
+                print(f"[SWARM] Gen {gen} visual evidence already exists, skipping re-render.")
+                gen_video = gen_mp4
+            else:
+                print(f"\n>>> [GEN {gen}] RENDERING SWARM VISUALIZATIONS (QR-DQN vs PPO)...")
+                gen_video = render_generation_swarm(checkpoint_dir, visual_dir, gen, num_envs=args.num_envs)
+
             if gen_video and gen_video.exists():
                 rendered_videos.append(gen_video)
                 stitched_video = visual_dir / "stitched_chronological_benchmark.mp4"
