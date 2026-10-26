@@ -133,6 +133,7 @@ class QRDQNAgent:
         )
 
         self.train_steps = 0
+        self.num_timesteps = 0
 
     def select_action(self, state: np.ndarray, epsilon: float = 0.05) -> int:
         """Epsilon-greedy action selection for a single observation."""
@@ -228,8 +229,8 @@ class QRDQNAgent:
             "beta": float(self.buffer.current_beta),
         }
 
-    def save(self, path: Path):
-        """Saves agent weights and optimizer state."""
+    def save(self, path: Path, save_buffer: bool = True):
+        """Saves agent weights, optimizer state, and Prioritized Replay Buffer."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
@@ -237,15 +238,26 @@ class QRDQNAgent:
             "target_net": self.target_net.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "train_steps": self.train_steps,
+            "num_timesteps": self.num_timesteps,
         }, path)
         print(f"[QRDQN] Saved model checkpoint to: {path}")
+        if save_buffer:
+            buf_path = path.with_name(f"{path.stem}_buffer.npz")
+            self.buffer.save(buf_path)
+            print(f"[QRDQN] Saved replay buffer ({len(self.buffer)} samples) to: {buf_path}")
 
-    def load(self, path: Path):
-        """Loads agent weights and optimizer state."""
+    def load(self, path: Path, load_buffer: bool = True):
+        """Loads agent weights, optimizer state, and Prioritized Replay Buffer."""
         path = Path(path)
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.online_net.load_state_dict(checkpoint["online_net"])
         self.target_net.load_state_dict(checkpoint["target_net"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.train_steps = checkpoint.get("train_steps", 0)
-        print(f"[QRDQN] Loaded model checkpoint from: {path}")
+        self.num_timesteps = checkpoint.get("num_timesteps", 0)
+        print(f"[QRDQN] Loaded model checkpoint from: {path} (num_timesteps={self.num_timesteps:,}, train_steps={self.train_steps:,})")
+        if load_buffer:
+            buf_path = path.with_name(f"{path.stem}_buffer.npz")
+            if buf_path.exists():
+                self.buffer.load(buf_path)
+                print(f"[QRDQN] Loaded replay buffer ({len(self.buffer)} samples) from: {buf_path}")

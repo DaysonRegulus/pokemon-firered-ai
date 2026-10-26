@@ -163,5 +163,40 @@ class PrioritizedReplayBuffer:
             self.max_priority = max(self.max_priority, float(np.abs(error)) + self.eps)
             self.tree.update(int(idx), priority)
 
+    def save(self, path):
+        """Serializes replay buffer states, transitions, and SumTree priorities."""
+        from pathlib import Path
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            path,
+            states=self.states,
+            actions=self.actions,
+            rewards=self.rewards,
+            next_states=self.next_states,
+            dones=self.dones,
+            tree=self.tree.tree,
+            min_tree=self.tree.min_tree,
+            meta=np.array([self.ptr, self.size, self.step_count, self.max_priority], dtype=np.float64)
+        )
+
+    def load(self, path):
+        """Loads serialized replay buffer states, transitions, and SumTree priorities."""
+        from pathlib import Path
+        path = Path(path)
+        data = np.load(path)
+        self.states[:] = data["states"]
+        self.actions[:] = data["actions"]
+        self.rewards[:] = data["rewards"]
+        self.next_states[:] = data["next_states"]
+        self.dones[:] = data["dones"]
+        self.tree.tree[:] = data["tree"]
+        self.tree.min_tree[:] = data["min_tree"]
+        meta = data["meta"]
+        self.ptr = int(meta[0])
+        self.size = int(meta[1])
+        self.step_count = int(meta[2])
+        self.max_priority = float(meta[3])
+
     def __len__(self) -> int:
         return self.size

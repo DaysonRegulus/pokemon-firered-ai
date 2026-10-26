@@ -33,6 +33,17 @@ from pokefirered.ssim_module import OptimizedSSIMModule
 from pokefirered.models import QRDQNAgent
 
 
+def compute_dynamic_timesteps(lifetime_steps: int, min_steps: int = 4096, growth_rate: float = 0.05, quantize: int = 2048) -> int:
+    """
+    Computes dynamic training horizon based on model lifetime:
+        dynamic_steps = round((min_steps + lifetime * growth_rate) / quantize) * quantize
+    Clamped to minimum of quantize (default: 2048).
+    """
+    raw = min_steps + (lifetime_steps * growth_rate)
+    quantized = int(round(raw / quantize) * quantize)
+    return max(quantize, quantized)
+
+
 def get_model_paths(model_dir: Path, env_name: str, algo: str, num_envs: int, exploration_mode: str):
     clean_mode = exploration_mode.replace("+", "_")
     prefix = f"{env_name}-{algo}-{clean_mode}-{num_envs}env"
@@ -55,6 +66,7 @@ def parse_args():
         help="Exploration mode: RND, SSIM, COORD, NONE, or hybrid combinations like RND+COORD, SSIM+COORD, RND+SSIM, RND+SSIM+COORD",
     )
     parser.add_argument("--timesteps", type=int, default=None, help="Explicit training steps (overrides dynamic curriculum)")
+    parser.add_argument("--generation", type=int, default=None, help="Generation index for curriculum benchmarking")
     parser.add_argument("--render-mode", type=str, default=None, choices=["human", None], help="Render mode")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda/cpu)")
     parser.add_argument("--log-dir", type=str, default="logs", help="Tensorboard log directory")
@@ -115,10 +127,17 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     if coord_module is not None and coord_path.exists():
         coord_module.load(str(coord_path))
 
-    total_target_timesteps = args.timesteps or 20480
+    current_lifetime = agent.num_timesteps
+    if args.timesteps is not None:
+        total_target_timesteps = args.timesteps
+    else:
+        total_target_timesteps = compute_dynamic_timesteps(current_lifetime)
+
     target_iterations = max(1, total_target_timesteps // args.num_envs)
     total_steps = target_iterations * args.num_envs
-    print(f"\n[QR-DQN + PER] Scheduled iterations: {target_iterations:,} ({total_steps:,} total environment steps across {args.num_envs} envs)\n")
+    print(f"\n[QR-DQN + PER] Model Lifetime Before Run: {current_lifetime:,} steps")
+    print(f"[QR-DQN + PER] Scheduled Run Iterations: {target_iterations:,} ({total_steps:,} environment steps across {args.num_envs} envs)")
+    print(f"[QR-DQN + PER] Expected Lifetime After Run: {current_lifetime + total_steps:,} steps\n")
 
     visited_tiles = set()
     visited_maps = set()
@@ -131,106 +150,116 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     obs = vec_env.reset()
     start_time = time.time()
 
-    for step in range(target_iterations):
-        # Epsilon decay schedule
-        progress = min(1.0, (step * args.num_envs) / max(1, args.epsilon_decay_steps))
-        epsilon = args.epsilon_start - progress * (args.epsilon_start - args.epsilon_end)
+    try:
+        for step in range(target_iterations):
+            # Epsilon decay schedule based on cumulative environment transitions
+            current_env_step = current_lifetime + (step * args.num_envs)
+            progress = min(1.0, current_env_step / max(1, args.epsilon_decay_steps))
+            epsilon = args.epsilon_start - progress * (args.epsilon_start - args.epsilon_end)
 
-        # Batch action selection for parallel environments
-        actions = agent.select_actions(obs, epsilon=epsilon)
-        next_obs, rewards, dones, infos = vec_env.step(actions)
+            # Batch action selection for parallel environments
+            actions = agent.select_actions(obs, epsilon=epsilon)
+            next_obs, rewards, dones, infos = vec_env.step(actions)
 
-        # Compute intrinsic curiosity bonuses vectorially
-        obs_latest = next_obs[:, -1:, :, :].astype(np.float32) / 255.0
+            # Compute intrinsic curiosity bonuses vectorially
+            obs_latest = next_obs[:, -1:, :, :].astype(np.float32) / 255.0
 
-        r_rnd_vec = None
-        if rnd_module is not None:
-            r_rnd_vec, _ = rnd_module.compute_intrinsic_reward(obs_latest)
-            if rnd_rollout_buffer is not None:
-                rnd_rollout_buffer.append(obs_latest)
-                if len(rnd_rollout_buffer) >= 32:  # 32 * num_envs = 256 samples
-                    batch_rnd = np.concatenate(rnd_rollout_buffer, axis=0)
-                    rnd_module.train_batch(batch_rnd, epochs=2, batch_size=64)
-                    rnd_rollout_buffer.clear()
+            r_rnd_vec = None
+            if rnd_module is not None:
+                r_rnd_vec, _ = rnd_module.compute_intrinsic_reward(obs_latest)
+                if rnd_rollout_buffer is not None:
+                    rnd_rollout_buffer.append(obs_latest)
+                    if len(rnd_rollout_buffer) >= 32:  # 32 * num_envs = 256 samples
+                        batch_rnd = np.concatenate(rnd_rollout_buffer, axis=0)
+                        rnd_module.train_batch(batch_rnd, epochs=2, batch_size=64)
+                        rnd_rollout_buffer.clear()
 
-        r_ssim_vec = None
-        if ssim_module is not None:
-            r_ssim_vec, _ = ssim_module.compute_intrinsic_reward(obs_latest)
+            r_ssim_vec = None
+            if ssim_module is not None:
+                r_ssim_vec, _ = ssim_module.compute_intrinsic_reward(obs_latest)
 
-        r_coord_vec = None
-        if coord_module is not None:
-            map_banks = [infos[i].get("map_bank", 0) for i in range(args.num_envs)]
-            map_nums = [infos[i].get("map_num", 0) for i in range(args.num_envs)]
-            xs = [infos[i].get("pos_x", 0) for i in range(args.num_envs)]
-            ys = [infos[i].get("pos_y", 0) for i in range(args.num_envs)]
-            r_coord_vec, _ = coord_module.compute_intrinsic_reward(map_banks, map_nums, xs, ys)
+            r_coord_vec = None
+            if coord_module is not None:
+                map_banks = [infos[i].get("map_bank", 0) for i in range(args.num_envs)]
+                map_nums = [infos[i].get("map_num", 0) for i in range(args.num_envs)]
+                xs = [infos[i].get("pos_x", 0) for i in range(args.num_envs)]
+                ys = [infos[i].get("pos_y", 0) for i in range(args.num_envs)]
+                r_coord_vec, _ = coord_module.compute_intrinsic_reward(map_banks, map_nums, xs, ys)
 
-        for i in range(args.num_envs):
-            r_ext = float(rewards[i])
-            r_int = 0.0
+            for i in range(args.num_envs):
+                r_ext = float(rewards[i])
+                r_int = 0.0
 
-            if r_rnd_vec is not None:
-                r_int += args.rnd_beta * float(r_rnd_vec[i])
-            if r_ssim_vec is not None:
-                r_int += args.ssim_beta * float(r_ssim_vec[i])
-            if r_coord_vec is not None:
-                r_int += args.coord_beta * float(r_coord_vec[i])
+                if r_rnd_vec is not None:
+                    r_int += args.rnd_beta * float(r_rnd_vec[i])
+                if r_ssim_vec is not None:
+                    r_int += args.ssim_beta * float(r_ssim_vec[i])
+                if r_coord_vec is not None:
+                    r_int += args.coord_beta * float(r_coord_vec[i])
 
-            # Ground-truth RAM coordinates tracking
-            info = infos[i]
-            if "pos_x" in info and "pos_y" in info and "map_bank" in info:
-                raw_x = int(info["pos_x"])
-                raw_y = int(info["pos_y"])
-                mb = int(info["map_bank"])
-                mn = int(info["map_num"])
-                x = max(0, raw_x - 7) if raw_x >= 7 else raw_x
-                y = max(0, raw_y - 7) if raw_y >= 7 else raw_y
+                # Ground-truth RAM coordinates tracking
+                info = infos[i]
+                if "pos_x" in info and "pos_y" in info and "map_bank" in info:
+                    raw_x = int(info["pos_x"])
+                    raw_y = int(info["pos_y"])
+                    mb = int(info["map_bank"])
+                    mn = int(info["map_num"])
+                    x = max(0, raw_x - 7) if raw_x >= 7 else raw_x
+                    y = max(0, raw_y - 7) if raw_y >= 7 else raw_y
 
-                tile = (mb, mn, raw_x, raw_y)
-                visited_tiles.add(tile)
-                visited_maps.add((mb, mn))
+                    tile = (mb, mn, raw_x, raw_y)
+                    visited_tiles.add(tile)
+                    visited_maps.add((mb, mn))
 
-                if args.record_trajectories and i < len(agent_trajectories):
-                    agent_trajectories[i].append((mb, mn, x, y))
+                    if args.record_trajectories and i < len(agent_trajectories):
+                        agent_trajectories[i].append((mb, mn, x, y))
 
-            total_extrinsic += r_ext
-            total_intrinsic += r_int
-            r_total = r_ext + r_int
+                total_extrinsic += r_ext
+                total_intrinsic += r_int
+                r_total = r_ext + r_int
 
-            # Add transition to Prioritized Replay Buffer
-            agent.buffer.add(obs[i], actions[i], r_total, next_obs[i], dones[i])
+                # Add transition to Prioritized Replay Buffer
+                agent.buffer.add(obs[i], actions[i], r_total, next_obs[i], dones[i])
 
-        # Optimize QR-DQN network with Quantile Huber loss
-        metrics = agent.update()
-        obs = next_obs
+            # Optimize QR-DQN network with Quantile Huber loss
+            metrics = agent.update()
+            obs = next_obs
 
-        if (step + 1) % 100 == 0 or step == target_iterations - 1:
-            elapsed = time.time() - start_time
-            curr_timesteps = (step + 1) * args.num_envs
-            sps = curr_timesteps / max(0.001, elapsed)
-            q_str = f"Q-loss: {metrics['qr_loss']:.4f} | Mean Q: {metrics['mean_q']:.3f}" if metrics else "Warmup"
-            print(f"  [STEP {curr_timesteps:6d}/{total_steps:6d}] SPS: {sps:5.1f} | Eps: {epsilon:.3f} | {q_str} | Tiles: {len(visited_tiles)} | Maps: {len(visited_maps)}")
+            if (step + 1) % 100 == 0 or step == target_iterations - 1:
+                elapsed = time.time() - start_time
+                curr_timesteps = (step + 1) * args.num_envs
+                sps = curr_timesteps / max(0.001, elapsed)
+                q_str = f"Q-loss: {metrics['qr_loss']:.4f} | Mean Q: {metrics['mean_q']:.3f}" if metrics else "Warmup"
+                print(f"  [STEP {curr_timesteps:6d}/{total_steps:6d}] SPS: {sps:5.1f} | Eps: {epsilon:.3f} | {q_str} | Tiles: {len(visited_tiles)} | Maps: {len(visited_maps)}")
+
+        completed_steps = total_steps
+    except KeyboardInterrupt:
+        print("\n[WARN] QR-DQN Training interrupted by user! Gracefully preserving learned state...")
+        completed_steps = (step + 1) * args.num_envs
 
     elapsed = time.time() - start_time
-    sps = total_steps / max(0.001, elapsed)
+    sps = completed_steps / max(0.001, elapsed)
+    agent.num_timesteps = current_lifetime + completed_steps
 
     print("\n" + "=" * 55)
     print(" QR-DQN + PER TRAINING SESSION COMPLETE - SUMMARY")
     print("=" * 55)
-    print(f" Algorithm        : QR-DQN with Prioritized Experience Replay")
-    print(f" Exploration Mode : {args.exploration}")
-    print(f" Timesteps        : {total_steps:,}")
-    print(f" Elapsed Time     : {elapsed:.1f}s ({elapsed/60:.1f} min)")
-    print(f" Average SPS      : {sps:.1f}")
-    print(f" Extrinsic Reward : {total_extrinsic:.2f}")
-    print(f" Intrinsic Reward : {total_intrinsic:.2f}")
-    print(f" Total Reward     : {total_extrinsic + total_intrinsic:.2f}")
-    print(f" Total Unique Tiles Discovered: {len(visited_tiles)}")
-    print(f" Total Unique Maps Discovered:  {len(visited_maps)}")
+    print(f" Algorithm             : QR-DQN with Prioritized Experience Replay")
+    print(f" Exploration Mode      : {args.exploration}")
+    print(f" Session Steps         : {completed_steps:,}")
+    print(f" Cumulative Lifetime   : {agent.num_timesteps:,}")
+    print(f" Replay Buffer Size    : {len(agent.buffer):,} / {agent.buffer.capacity:,}")
+    print(f" Elapsed Time          : {elapsed:.1f}s ({elapsed/60:.1f} min)")
+    print(f" Average SPS           : {sps:.1f}")
+    print(f" Extrinsic Reward      : {total_extrinsic:.2f}")
+    print(f" Intrinsic Reward      : {total_intrinsic:.2f}")
+    print(f" Total Reward          : {total_extrinsic + total_intrinsic:.2f}")
+    print(f" Total Unique Tiles    : {len(visited_tiles)}")
+    print(f" Total Unique Maps     : {len(visited_maps)}")
     print("=" * 55 + "\n")
 
     # Save checkpoints & metrics summary
-    agent.save(model_file_pth)
+    agent.save(model_file_pth, save_buffer=True)
     if rnd_module is not None:
         rnd_module.save(str(rnd_path))
     if ssim_module is not None:
@@ -241,8 +270,10 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     summary_data = {
         "algo": "QRDQN",
         "exploration": args.exploration,
+        "generation": args.generation,
         "num_envs": args.num_envs,
-        "timesteps": total_steps,
+        "timesteps": completed_steps,
+        "cumulative_timesteps": agent.num_timesteps,
         "elapsed_seconds": round(elapsed, 2),
         "sps": round(sps, 1),
         "extrinsic_reward": round(total_extrinsic, 2),
@@ -261,6 +292,21 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
         with open(traj_file, "w", encoding="utf-8") as f:
             json.dump(agent_trajectories, f)
         print(f"Full per-agent coordinate trajectories saved to: {traj_file}")
+
+    if args.generation is not None:
+        gen_prefix = f"{model_path.stem}_gen{args.generation:03d}"
+        gen_summary = checkpoint_dir / f"{gen_prefix}_summary.json"
+        with open(gen_summary, "w") as f:
+            json.dump(summary_data, f, indent=2)
+        if args.record_trajectories and agent_trajectories:
+            gen_traj = checkpoint_dir / f"{gen_prefix}_trajectories.json"
+            with open(gen_traj, "w", encoding="utf-8") as f:
+                json.dump(agent_trajectories, f)
+        # Snapshot weights
+        agent.save(checkpoint_dir / f"{gen_prefix}.pth", save_buffer=False)
+        if rnd_module is not None:
+            rnd_module.save(str(checkpoint_dir / f"{gen_prefix}_rnd.pth"))
+        print(f"Generation {args.generation} snapshot archived to {gen_prefix}.*")
 
 
 def main():
@@ -321,12 +367,15 @@ def main():
                 coord_module.load(str(coord_path))
         else:
             print("No existing model found. Initializing new PPO model...")
+            # Align rollout buffer with 2048 step quantum so dynamic curriculum steps divide evenly
+            n_steps = max(16, 2048 // args.num_envs)
+            batch_size = min(512, n_steps * args.num_envs)
             model = PPO(
                 policy="CnnPolicy",
                 env=vec_env,
                 learning_rate=2.5e-4,
-                n_steps=1024,
-                batch_size=512,
+                n_steps=n_steps,
+                batch_size=batch_size,
                 n_epochs=4,
                 gamma=0.99,
                 gae_lambda=0.95,
@@ -337,7 +386,17 @@ def main():
                 device=args.device,
             )
 
-        target_steps = args.timesteps or 20480
+        current_lifetime = model.num_timesteps
+        if args.timesteps is not None:
+            target_steps = args.timesteps
+        else:
+            target_steps = compute_dynamic_timesteps(current_lifetime)
+
+        print("\n" + "=" * 55)
+        print(f"[PPO] Model Lifetime Before Run: {current_lifetime:,} steps")
+        print(f"[PPO] Scheduled Run Steps:       {target_steps:,} steps across {args.num_envs} envs")
+        print(f"[PPO] Expected Lifetime After:   {current_lifetime + target_steps:,} steps")
+        print("=" * 55 + "\n")
 
         # Setup callbacks
         intrinsic_cbs = []
@@ -364,35 +423,44 @@ def main():
             ))
 
         start_time = time.time()
-        model.learn(
-            total_timesteps=target_steps,
-            callback=callbacks,
-            tb_log_name=run_name,
-            reset_num_timesteps=False,
-        )
+        try:
+            model.learn(
+                total_timesteps=target_steps,
+                callback=callbacks,
+                tb_log_name=run_name,
+                reset_num_timesteps=False,
+            )
+            completed_steps = target_steps
+        except KeyboardInterrupt:
+            print("\n[WARN] PPO Training interrupted by user! Gracefully preserving learned state...")
+            completed_steps = model.num_timesteps - current_lifetime
+
         elapsed = time.time() - start_time
-        sps = target_steps / elapsed if elapsed > 0 else 0
+        sps = completed_steps / max(0.001, elapsed)
         rewards = reward_callback.get_rewards()
 
         print("\n" + "=" * 50)
         print(" PPO TRAINING RUN COMPLETE - SUMMARY")
         print("=" * 50)
-        print(f" Exploration Mode : {args.exploration}")
-        print(f" Timesteps        : {target_steps:,}")
-        print(f" Elapsed Time     : {elapsed:.1f}s ({elapsed/60:.1f} min)")
-        print(f" Average SPS      : {sps:.1f}")
-        print(f" Extrinsic Reward : {rewards['extrinsic']:.2f}")
-        print(f" Intrinsic Reward : {rewards['intrinsic']:.2f}")
-        print(f" Total Reward     : {rewards['total']:.2f}")
-        print(f" Total Unique Tiles Discovered: {len(exploration_tracker.global_visited_tiles)}")
-        print(f" Total Unique Maps Discovered:  {len(exploration_tracker.global_visited_maps)}")
+        print(f" Exploration Mode      : {args.exploration}")
+        print(f" Session Steps         : {completed_steps:,}")
+        print(f" Cumulative Lifetime   : {model.num_timesteps:,}")
+        print(f" Elapsed Time          : {elapsed:.1f}s ({elapsed/60:.1f} min)")
+        print(f" Average SPS           : {sps:.1f}")
+        print(f" Extrinsic Reward      : {rewards['extrinsic']:.2f}")
+        print(f" Intrinsic Reward      : {rewards['intrinsic']:.2f}")
+        print(f" Total Reward          : {rewards['total']:.2f}")
+        print(f" Total Unique Tiles    : {len(exploration_tracker.global_visited_tiles)}")
+        print(f" Total Unique Maps     : {len(exploration_tracker.global_visited_maps)}")
         print("=" * 50 + "\n")
 
         summary_data = {
             "algo": "PPO",
             "exploration": args.exploration,
+            "generation": args.generation,
             "num_envs": args.num_envs,
-            "timesteps": target_steps,
+            "timesteps": completed_steps,
+            "cumulative_timesteps": model.num_timesteps,
             "elapsed_seconds": round(elapsed, 2),
             "sps": round(sps, 1),
             "extrinsic_reward": round(float(rewards['extrinsic']), 2),
@@ -416,6 +484,22 @@ def main():
                 exploration_tracker.save_trajectories(traj_file)
             except Exception as e:
                 print(f"[WARN] Failed to save trajectories: {e}")
+
+        if args.generation is not None:
+            gen_prefix = f"{model_path.stem}_gen{args.generation:03d}"
+            gen_summary = checkpoint_dir / f"{gen_prefix}_summary.json"
+            with open(gen_summary, "w") as f:
+                json.dump(summary_data, f, indent=2)
+            if args.record_trajectories and exploration_tracker.agent_trajectories:
+                gen_traj = checkpoint_dir / f"{gen_prefix}_trajectories.json"
+                try:
+                    exploration_tracker.save_trajectories(gen_traj)
+                except Exception as e:
+                    print(f"[WARN] Failed to save gen trajectories: {e}")
+            model.save(str(checkpoint_dir / gen_prefix))
+            if rnd_module is not None:
+                rnd_module.save(str(checkpoint_dir / f"{gen_prefix}_rnd.pth"))
+            print(f"Generation {args.generation} snapshot archived to {gen_prefix}.*")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Saving current weights...")
