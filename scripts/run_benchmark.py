@@ -59,6 +59,10 @@ def parse_args():
     parser.add_argument("--log-dir", type=str, default="logs/benchmark_rnd_curriculum", help="TensorBoard logs directory")
     parser.add_argument("--visual-dir", type=str, default="visual_evidence/benchmark_rnd_curriculum", help="Visual evidence directory")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Compute device")
+    parser.add_argument("--ent-coef", type=float, default=0.08, help="Entropy coefficient for PPO (default: 0.08)")
+    parser.add_argument("--epsilon-start", type=float, default=1.0, help="Initial exploration rate for QR-DQN (default: 1.0)")
+    parser.add_argument("--epsilon-end", type=float, default=0.20, help="Final exploration rate / epsilon-floor for QR-DQN (default: 0.20)")
+    parser.add_argument("--epsilon-decay-steps", type=int, default=5_000_000, help="Epsilon decay steps for QR-DQN (default: 5,000,000)")
     parser.add_argument("--fresh", action="store_true", help="Force fresh benchmark start, ignoring existing benchmark_state.json")
     parser.add_argument("--no-render", action="store_true", help="Disable per-generation swarm rendering and video stitching")
     return parser.parse_args()
@@ -322,6 +326,9 @@ def main():
                 "--checkpoint-dir", str(args.checkpoint_dir),
                 "--log-dir", str(args.log_dir),
                 "--device", args.device,
+                "--epsilon-start", str(args.epsilon_start),
+                "--epsilon-end", str(args.epsilon_end),
+                "--epsilon-decay-steps", str(args.epsilon_decay_steps),
             ]
             if gen == 1 and state["qrdqn_lifetime_steps"] == 0:
                 cmd_dqn.append("--fresh")
@@ -375,6 +382,7 @@ def main():
                 "--checkpoint-dir", str(args.checkpoint_dir),
                 "--log-dir", str(args.log_dir),
                 "--device", args.device,
+                "--ent-coef", str(args.ent_coef),
             ]
             if gen == 1 and state["ppo_lifetime_steps"] == 0:
                 cmd_ppo.append("--fresh")
