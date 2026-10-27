@@ -2075,3 +2075,80 @@ Before commencing training, a 5-test automated verification suite (`scratch/test
    - Every generation produced synchronized GBA sprite swarm animations: `visual_evidence/benchmark_rnd_curriculum/benchmark_rnd_curriculum_gen001.gif` through `gen020.gif`.
    - The entire 20-generation progression was compiled into a continuous master video:
      [`visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4) (**5,700 frames**, 138.4 MB).
+
+
+---
+
+## Phase 21: Empirical Telemetry Audit, Exploration Collapse Deconstruction, and Long-Horizon Hyperparameter Realignment
+
+**Date**: October 27, 2026  
+**Status**: COMPLETE & ARCHITECTURALLY VERIFIED (Full Telemetry Audit, Active Regression Deconstructed, 100x Horizon Scaling Implemented)
+
+### 1. Ground-Truth Telemetry Audit of the 20-Generation Benchmark
+Following visual inspection of the compiled 20-generation master timelapse (`stitched_chronological_benchmark.mp4`), a rigorous RAM-level audit of all 40 trajectory datasets (`PokemonFireRed-GBA-{QRDQN,PPO}-RND-8env_gen001_trajectories.json` through `gen020`) was executed to reconcile reported map metrics with physical coordinates.
+
+1. **Resolution of the "4 Maps" Metric**:
+   - The metric `unique_maps: 4` reported in Phase 20 reflected internal map banking within the starting settlement, **not** multi-city overland progression.
+   - Ground-truth RAM decoding revealed the exact distribution of the 262,144 transitions across all 20 generations:
+     - **`Map (4, 0)`**: **Hero's Living Room (1F)** — Downstairs starting room with Mom (Primary attractor: up to 8,392 steps/gen in PPO, 6,973 steps/gen in QR-DQN).
+     - **`Map (4, 1)`**: **Hero's Bedroom (2F)** — Upstairs room with PC and SNES (Reached via staircase warp: 3,590 steps in Gen 1 QR-DQN, 4,002 steps in Gen 1 PPO).
+     - **`Map (3, 0)`**: **Pallet Town Overworld** — Outdoor town square (Exited via front door warp: 1,117 steps in Gen 7 QR-DQN, 921 steps in Gen 15 PPO).
+     - **`Map (4, 2)`**: **Professor Oak's Laboratory** — Lab interior in south Pallet Town (30 steps in Gen 1 QR-DQN).
+   - **Empirical Confirmation**: Across all 20 generations, **zero transitions were recorded on Route 1 (`Map (3, 19)`) or Viridian City (`Map (3, 1)`)**. The agents never crossed the northern border of Pallet Town.
+
+---
+
+### 2. Deconstruction of the "Active Exploration Regression"
+The visual timelapse demonstrated an apparent paradox: agents actively explored Pallet Town exterior yards and lab grounds in early generations (Gens 1–7), but progressively regressed into complete confinement within the starting house in late generations (Gens 8–20). This pathology was deconstructed into three compounding failure modes:
+
+```
+[Early Generations 1-7]
+High Action Entropy (ε ≈ 0.95) ───► Brownian Diffusion ───► Randomly traverses 1-tile warps into Overworld
+
+[Late Generations 8-20]
+ε decays to 0.05 + RND Habituation ───► 95% Greedy Q-Policy ───► Trapped in Cyclic Indoor Attractor Loops
+```
+
+1. **Premature $\epsilon$-Greedy Decay Cliff in QR-DQN**:
+   - `--epsilon-decay-steps` was set to `50,000`.
+   - By Generation 8 (lifetime > 36,864 steps) and Generation 10 (lifetime = 49,152 steps), $\epsilon$ decayed to its hard floor of **`0.05`**.
+   - At $\epsilon = 0.05$, **95% of all actions were executed greedily by the neural Q-network**: $a^* = \arg\max_a Q(s, a)$.
+   - Because the network had trained on habituated RND intrinsic rewards within the starting house, the Q-function learned cyclic local attractors (oscillating against walls or furniture). Without high stochastic perturbations, the probability of a greedy policy hitting a 1-tile door warp dropped to near zero.
+   - **Empirical Evidence**: Between Generation 8 and Generation 18, **100% of QR-DQN's transitions (6,143 to 8,191 steps per run) were trapped indoors**.
+2. **RND Epistemic Curiosity Habituation ("Couch Potato" Attractor)**:
+   - RND intrinsic reward is non-stationary: $R_{\text{int}}(s) = \|\hat{f}_\theta(s) - f(s)\|^2$.
+   - Because the environment consistently spawns at the same indoor coordinates, the RND predictor network rapidly drove prediction error to near zero on familiar house textures ($R_{\text{int}}$ collapsed from $171.62$ in Gen 1 to $3–10$ in late generations).
+   - In the absence of extrinsic reward gradients ($R_{\text{ext}} = 0.00$ prior to battles), exiting through the door required a coordinated 15-step sequence with zero intermediate reward. The policy received no gradient toward the doorway, causing it to settle into stationary or minimal-displacement looping.
+3. **PPO Policy Entropy Collapse**:
+   - PPO maintained slightly more cross-room movement due to categorical stochasticity, but with `ent_coef = 0.03`, action distribution entropy steadily decayed, trapping 80%–90% of transitions between the living room table and the upstairs stairs.
+
+---
+
+### 3. Active Save State Invariants & Permanent COORD Rejection
+
+1. **Active Save State Invariants**:
+   - Verification confirmed that all environment instances exclusively load **`BeginningPalletGotPokeballs.state`**.
+   - **Spawn Location**: The agent spawns on **`Map (4, 0)`: Hero's Living Room (1F)** downstairs where Mom is.
+   - **Party & Items**: Bulbasaur is already in party (Party Count = 1; Level 5); Pokéballs are in the inventory.
+   - **Cutscene Status**: Professor Oak's intro grass cutscene is already completed and cleared. Agents stepping north into Pallet Town tall grass do not trigger a scripted freeze.
+2. **Re-Affirmation of COORD Rejection**:
+   - Re-confirmed the permanent deprecation of micro-coordinate novelty (`COORD`, $1/\sqrt{N}$).
+   - While count-based coordinate rewards maximize local tile counts, they induce the **Roomba Fallacy** (exhaustive perimeter and carpet mowing rather than bottleneck traversal) and inject severe variance into off-policy replay targets.
+   - Exploration remains focused on visual epistemic prediction (`RND`), augmented by proper action entropy.
+
+---
+
+### 4. Long-Horizon Hyperparameter Realignment (Peter Whidden Standard)
+
+In reinforcement learning for full-length RPGs (Pleines, Whidden, et al., *“Pokémon Red via Reinforcement Learning”*), learning macro behaviors (overland navigation, battle tactics, gym progression) requires **tens to hundreds of millions of environment steps**. A 131,000-step benchmark represents less than $0.2\%$ of policy initialization.
+
+To eliminate premature exploitation collapse and align the architecture with long-horizon training, the following parameter updates were implemented across `scripts/train.py` and `scripts/run_benchmark.py`:
+
+| Parameter | Previous Value | Updated Value | Architectural Rationalization |
+| :--- | :---: | :---: | :--- |
+| **`--epsilon-decay-steps`** | 50,000 | **5,000,000** | **100x Scale**: Prevents premature greedy lockup during early multi-room exploration. At 131k steps, $\epsilon \approx 0.98$, maintaining active diffusion. |
+| **`--epsilon-end`** ($\epsilon$-floor) | 0.05 | **0.20** | Guarantees a persistent 20% random action injection even in late training, preventing deterministic wall-trapping in complex room mazes. |
+| **`--ent-coef`** | 0.03 | **0.08** | Sustains PPO categorical action distribution entropy, preventing premature convergence to local cyclic attractors. |
+
+### 5. Architectural Persistence via `AGENTS.md`
+To prevent technical drift and loss of ground-truth invariants across long multi-turn sessions subject to LLM context compaction, [**`AGENTS.md`**](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/AGENTS.md) was created in the repository root. As an always-on project rule file, its constraints (save state ground truth, map coordinates, rejected exploration paradigms, and chronicle maintenance rules) are injected unconditionally on every turn.

@@ -58,3 +58,19 @@ This document establishes the ground-truth technical invariants and architectura
      - `--epsilon-end` ($\epsilon$-floor): Minimum floor of **`0.20`** (ensuring 20% random action injection even after millions of steps to prevent deterministic wall-locking).
    - **PPO Policy Entropy**:
      - `--ent-coef`: Set to **`0.08`** (preventing policy collapse into local attractor loops).
+
+---
+
+## 5. Research Chronicle Maintenance Protocol
+
+1. **Periodic Manual Synchronization**:
+   - The agent MUST periodically update [`RESEARCH_CHRONICLE.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/RESEARCH_CHRONICLE.md) manually at logical research checkpoints:
+     - Upon completion of a training run, multi-generation benchmark, or experimental phase.
+     - Following major architectural changes, hyperparameter overhauls, or algorithmic pivots.
+     - Whenever empirical findings reveal unexpected behaviors, pathologies, or critical corrections.
+2. **Strictly Non-Automated (Manual Review Standard)**:
+   - Updates must **NEVER** be delegated to unattended background cron daemons, automated OS schedules, or headless script hooks.
+   - The agent must personally inspect and verify the empirical data (RAM coordinates, loss curves, reward distributions, trajectory files) before logging entries, ensuring rigorous academic analysis and preventing erroneous assertions.
+3. **Immutability & Non-Destructive Standard**:
+   - Updates must strictly append new numbered phases to the end of the document without modifying, renumbering, or deleting historical phases.
+   - Maintain the IEEE/NeurIPS formal academic tone, complete telemetry tables, and KaTeX mathematical notation.
