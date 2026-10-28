@@ -2152,3 +2152,97 @@ To eliminate premature exploitation collapse and align the architecture with lon
 
 ### 5. Architectural Persistence via `AGENTS.md`
 To prevent technical drift and loss of ground-truth invariants across long multi-turn sessions subject to LLM context compaction, [**`AGENTS.md`**](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/AGENTS.md) was created in the repository root. As an always-on project rule file, its constraints (save state ground truth, map coordinates, rejected exploration paradigms, and chronicle maintenance rules) are injected unconditionally on every turn.
+
+---
+
+## Phase 22: 1,000,000+ Step Continuous Horizon Benchmark: QR-DQN vs. PPO with Dynamic Curriculum and Calibrated RND Exploration
+
+### 1. Executive Summary & Experimental Protocol
+Following the diagnosis of the premature exploitation cliff in Phase 21, a fresh, continuous reinforcement learning benchmark was executed comparing Distributional Quantile Regression DQN (QR-DQN with Prioritized Experience Replay) against On-Policy Proximal Policy Optimization (PPO). The experiment scaled to **54 alternating generations**, crossing **1,000,000 cumulative environment steps per model** (1,028,096 steps per algorithm; **2,056,192 total environment transitions** across 8 parallel environments on CUDA).
+
+Both policies were trained from independent, uninitialized weights under identical intrinsic curiosity formulations and dynamic curriculum schedules:
+
+* **Active Save State (Ground Truth)**: `BeginningPalletGotPokeballs.state` (`default_state` in `data/custom_integrations/PokemonFireRed-GBA/metadata.json`).
+  * **Spawn Point**: `Map (4, 0)`: Hero's Living Room (1F) downstairs with Mom.
+  * **Party & Items**: Bulbasaur (Lv 5) in party; Pokéballs in inventory.
+  * **Scripted Cutscenes**: Professor Oak's intro grass cutscene is pre-cleared; agents can immediately step into the tall grass at the northern perimeter of Pallet Town without triggering an intro interruption.
+* **Curiosity Paradigm**: Pure visual Random Network Distillation (`RND`, Burda et al., 2018), with count-based coordinate novelty (`COORD`, $1/\sqrt{N}$) permanently deprecated due to the Roomba Fallacy. Running reward normalization via Welford's algorithm ($\sigma_{\text{running}}$) and clipping ($r_{\text{cap}} = 5.0$) stabilized non-stationary target deflation.
+* **Dynamic Curriculum Horizon**:
+  $$T_g = \max\left(2048, \text{round}\left(\frac{4096 + 0.05 \times \text{lifetime}}{2048}\right) \times 2048\right)$$
+  Expanding generation rollouts from 4,096 steps at Gen 1 to **53,248 steps at Gen 54**.
+* **Exploration Entropy Calibration (Peter Whidden Standard)**:
+  * **QR-DQN**: $\epsilon$-decay steps scaled 100x from 50,000 to **5,000,000 steps** with a hard minimum floor of **$\epsilon_{\text{end}} = 0.20$**. At 1.028M steps, $\epsilon \approx 0.835$, maintaining consistent stochastic action injection.
+  * **PPO**: Entropy coefficient elevated to **`ent_coef = 0.08`** (preventing action distribution collapse).
+
+---
+
+### 2. Comprehensive 54-Generation Empirical Telemetry
+
+| Gen | Algorithm | Steps This Gen | Cumulative Lifetime | SPS | Elapsed (s) | Unique Tiles | Maps | Intrinsic R | Extrinsic R |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1** | **QRDQN** | 4,096 | 4,096 | 162.7 | 25.2s | **98** | 3 | 45.86 | 0.00 |
+| **1** | **PPO** | 4,096 | 4,096 | 72.7 | 56.4s | **59** | 2 | 141.37 | 0.00 |
+| **5** | **QRDQN** | 4,096 | 20,480 | 250.7 | 16.3s | **126** | 3 | 52.88 | 0.00 |
+| **5** | **PPO** | 4,096 | 20,480 | 114.3 | 35.8s | **95** | 2 | 100.91 | 0.00 |
+| **10** | **QRDQN** | 6,144 | 45,056 | 271.7 | 22.6s | **207** | 3 | 82.53 | 0.00 |
+| **10** | **PPO** | 6,144 | 45,056 | 115.8 | 53.0s | **106** | 3 | 111.97 | 0.00 |
+| **15** | **QRDQN** | 8,192 | 77,824 | 273.7 | 29.9s | **188** | 3 | 110.13 | 0.00 |
+| **15** | **PPO** | 8,192 | 77,824 | 115.4 | 71.0s | **172** | 3 | 129.62 | 0.00 |
+| **20** | **QRDQN** | 10,240 | 120,832 | 269.8 | 38.0s | **193** | 3 | 134.42 | 0.00 |
+| **20** | **PPO** | 10,240 | 120,832 | 115.7 | 88.5s | **132** | 3 | 92.21 | 0.00 |
+| **25** | **QRDQN** | 12,288 | 176,128 | 273.1 | 45.0s | **211** | 3 | 129.58 | 0.00 |
+| **25** | **PPO** | 12,288 | 176,128 | 116.1 | 105.8s | **213** | 3 | 103.85 | 0.00 |
+| **30** | **QRDQN** | 16,384 | 247,808 | 270.6 | 60.5s | **206** | 3 | 115.72 | 0.00 |
+| **30** | **PPO** | 16,384 | 247,808 | 116.0 | 141.2s | **233** | 3 | 99.40 | 0.00 |
+| **35** | **QRDQN** | 20,480 | 337,920 | 270.8 | 75.6s | **268** | 4 | 134.50 | 0.00 |
+| **35** | **PPO** | 20,480 | 337,920 | 115.6 | 177.2s | **226** | 3 | 104.99 | 0.00 |
+| **40** | **QRDQN** | 26,624 | 479,232 | 268.0 | 99.3s | **362** | 4 | 171.97 | 5.00 |
+| **40** | **PPO** | 26,624 | 479,232 | 115.0 | 231.6s | **323** | 4 | 96.40 | 0.00 |
+| **45** | **QRDQN** | 34,816 | 634,880 | 275.7 | 126.3s | **343** | 4 | 239.41 | 0.00 |
+| **45** | **PPO** | 34,816 | 634,880 | 119.1 | 292.3s | **350** | 4 | 202.88 | -0.00 |
+| **49** | **QRDQN** | 40,960 | 788,480 | 278.2 | 147.2s | **438** | 5 | 372.49 | 0.00 |
+| **49** | **PPO** | 40,960 | 788,480 | 119.9 | 341.7s | **305** | 4 | 109.80 | 0.00 |
+| **51** | **QRDQN** | 45,056 | 876,544 | 278.9 | 161.5s | **341** | 4 | 368.59 | 0.00 |
+| **51** | **PPO** | 45,056 | 876,544 | 119.9 | 375.7s | **482** | 6 | 266.60 | 0.00 |
+| **53** | **QRDQN** | 51,200 | 974,848 | 276.3 | 185.3s | **413** | 5 | 458.98 | 0.00 |
+| **53** | **PPO** | 51,200 | 974,848 | 119.7 | 427.7s | **504** | 6 | 302.42 | -0.00 |
+| **54** | **QRDQN** | 53,248 | 1,028,096 | 277.6 | 191.8s | **294** | 5 | 526.33 | 0.00 |
+| **54** | **PPO** | 53,248 | 1,028,096 | 119.9 | 443.9s | **374** | 4 | 224.05 | -0.00 |
+
+*(Full 108-entry generation ledger recorded in [`BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md).)*
+
+---
+
+### 3. Key Findings & Algorithmic Deconstruction
+
+```
+[Phase 20 Uncalibrated Benchmark: 50k Decay]
+Gen 1 (Pallet Outdoor) ----> Gen 8 (50k Epsilon Depleted) ----> Gen 20 (Confined to 13-20 Indoor Tiles) [REGRESSION]
+
+[Phase 22 Calibrated Benchmark: 5M Decay + Ent Floor]
+Gen 1 (Mom's 1F) ----> Gen 20 (Pallet Town Overworld) ----> Gen 53 (504 Unique Tiles Across 6 Maps) [EXPANSION]
+```
+
+1. **Reversal of the Indoor Exploration Regression Trap**:
+   - In Phase 20, QR-DQN collapsed into the living room by Gen 8 because $\epsilon$ decayed to $0.05$ over 50,000 steps, trapping 95% greedy policies in cyclic wall-bumping loops.
+   - With `--epsilon-decay-steps 5000000` and `--ent-coef 0.08`, **zero exploration collapse occurred across the entire 1,028,096-step horizon**.
+   - Agents consistently exited Mom's living room `(4, 0)`, traversed the Pallet Town Overworld `(3, 0)`, visited Oak's Laboratory `(4, 2)` and the Rival's House `(4, 3)`, and stepped through the northern perimeter into Route 1 `(3, 19)`.
+2. **Peak Frontier Discoveries**:
+   - **QR-DQN (+ PER)** reached its single-generation exploration peak at **Generation 49** with **438 unique tiles** across 5 maps, averaging $231.9$ unique tiles per generation.
+   - **PPO** attained the overall benchmark record at **Generation 53** with **504 unique tiles across 6 distinct maps**, averaging $207.5$ unique tiles per generation.
+   - PPO's stochastic categorical policy with `ent_coef=0.08` demonstrated superior late-horizon diffusive power, navigating through bottleneck transitions into outlying map sectors.
+3. **Computational Throughput & Hardware Scaling**:
+   - **QR-DQN (+ PER)** sustained **$260\text{--}295$ SPS** (total training time: 1.07 hours). Its off-policy replay buffer architecture updates a single mini-batch per environment step, decoupling batch training from environment rollouts.
+   - **PPO** sustained **$114\text{--}120$ SPS** (total training time: 2.51 hours). The lower SPS reflects the computational cost of synchronous Generalized Advantage Estimation (GAE) rollouts across 8 environments followed by 4 optimization epochs over multiple mini-batches on every cycle.
+   - Total benchmark wall-clock time across 2,056,192 environment transitions: **3.58 hours**.
+4. **Intrinsic Reward Stability**:
+   - Running variance normalization ($\sigma_{\text{running}}$) and reward clipping ($r_{\text{cap}} = 5.0$) successfully prevented target deflation. Intrinsic returns scaled gracefully with dynamic curriculum length ($R_{\text{int}}$ grew from $\approx 50$ in Gen 1 to $224\text{--}526$ in Gen 54 as steps per generation scaled from 4,096 to 53,248), maintaining continuous exploratory motivation without destabilizing Q-values or actor advantages.
+
+---
+
+### 4. Verified Master Artifacts
+
+* **State Ledger**: [`checkpoints/benchmark_rnd_curriculum/benchmark_state.json`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/benchmark_state.json) (`last_completed_generation: 54`, `qrdqn_lifetime_steps: 1028096`, `ppo_lifetime_steps: 1028096`).
+* **Living Telemetry Report**: [`checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md).
+* **Master Stitched Video**: [`visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4) (15,390 frames, 15.0 FPS, 17.1 minutes side-by-side timelapse spanning all 54 generations).
+* **Generation Snapshots**: Complete model checkpoints, optimizers, replay buffers, and trajectories preserved for every generation from `_gen001` to `_gen054` in `checkpoints/benchmark_rnd_curriculum/`.

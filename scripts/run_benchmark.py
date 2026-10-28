@@ -26,11 +26,11 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import torch
 
-# Force UTF-8 encoding on standard streams to avoid Windows cp1252 charmap errors
+# Force UTF-8 encoding and unbuffered output on standard streams
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -297,6 +297,12 @@ def main():
 
     rendered_videos = []
 
+    stitched_video = visual_dir / "stitched_chronological_benchmark.mp4"
+    if not args.no_render and not stitched_video.exists() and state["last_completed_generation"] > 0:
+        print("[STITCH] Stitched master video missing on disk. Compiling from completed generations...")
+        all_gen_videos = [visual_dir / f"benchmark_rnd_curriculum_gen{g:03d}.mp4" for g in range(1, state["last_completed_generation"] + 1)]
+        stitch_generation_videos(all_gen_videos, stitched_video)
+
     for gen in range(1, args.generations + 1):
         print(f"\n==================== [GENERATION {gen} / {args.generations}] ====================")
 
@@ -317,6 +323,7 @@ def main():
             print(f"\n>>> [GEN {gen}] LAUNCHING QR-DQN (+ PER) | Target Steps: {dqn_steps_for_gen:,}")
             cmd_dqn = [
                 python_exe,
+                "-u",
                 str(PROJECT_ROOT / "scripts" / "train.py"),
                 "--algo", "QRDQN",
                 "--exploration", "RND",
@@ -373,6 +380,7 @@ def main():
             print(f"\n>>> [GEN {gen}] LAUNCHING PPO | Target Steps: {ppo_steps_for_gen:,}")
             cmd_ppo = [
                 python_exe,
+                "-u",
                 str(PROJECT_ROOT / "scripts" / "train.py"),
                 "--algo", "PPO",
                 "--exploration", "RND",
@@ -417,14 +425,16 @@ def main():
             gen_mp4 = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.mp4"
             gen_gif = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.gif"
 
+            is_new_render = False
             if gen_mp4.exists() and gen_gif.exists():
                 print(f"[SWARM] Gen {gen} visual evidence already exists, skipping re-render.")
                 gen_video = gen_mp4
             else:
                 print(f"\n>>> [GEN {gen}] RENDERING SWARM VISUALIZATIONS (QR-DQN vs PPO)...")
                 gen_video = render_generation_swarm(checkpoint_dir, visual_dir, gen, num_envs=args.num_envs)
+                is_new_render = True
 
-            if gen_video and gen_video.exists():
+            if is_new_render and gen_video and gen_video.exists():
                 rendered_videos.append(gen_video)
                 stitched_video = visual_dir / "stitched_chronological_benchmark.mp4"
                 all_gen_videos = [visual_dir / f"benchmark_rnd_curriculum_gen{g:03d}.mp4" for g in range(1, gen + 1)]
