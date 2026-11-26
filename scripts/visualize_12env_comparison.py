@@ -152,20 +152,15 @@ def main():
         renderer.generate_timelapse(
             trajectories_by_gen=all_trajs,
             output_video_path=video_4way,
-            output_gif_path=gif_4way,
-            fps=15,
+            fps=60,
             trail_length=14,
-            gif_duration_ms=125,
-            gif_frame_skip=2,
-            intro_hold_frames=15,
-            outro_hold_frames=30,
+            intro_hold_frames=0,
+            outro_hold_frames=0,
             custom_palette=PALETTE_4WAY,
             custom_title="POKÉMON FIRERED: 12-ENV PPO vs QR-DQN BENCHMARK",
             custom_legend=legend_4way,
             group_tiles=tiles_4way,
         )
-        shutil.copyfile(gif_4way, showcase_gif)
-        print(f"[OK] Updated primary showcase GIF: {showcase_gif}")
 
         # Extract Keyframe Comparison Stills
         cap = cv2.VideoCapture(str(video_4way))
@@ -209,13 +204,10 @@ def main():
         renderer.generate_timelapse(
             trajectories_by_gen=ppo_trajs,
             output_video_path=video_ppo,
-            output_gif_path=gif_ppo,
-            fps=15,
+            fps=60,
             trail_length=14,
-            gif_duration_ms=125,
-            gif_frame_skip=2,
-            intro_hold_frames=15,
-            outro_hold_frames=30,
+            intro_hold_frames=0,
+            outro_hold_frames=0,
             custom_palette=PALETTE_PPO,
             custom_title="POKÉMON FIRERED: 12-ENV PPO (RND vs SSIM)",
             custom_legend=legend_ppo,
@@ -229,7 +221,6 @@ def main():
         print(" RENDERING 2-WAY QR-DQN SWARM (RND vs SSIM)")
         print("=" * 80)
         video_qrdqn = output_dir / "qrdqn_12env_rnd_vs_ssim.mp4"
-        gif_qrdqn = media_dir / "qrdqn_12env_rnd_vs_ssim.gif"
         legend_qrdqn = [
             ("QRDQN_RND", f"QR-DQN RND: ({all_metrics['QRDQN_RND']['tiles']} tiles)"),
             ("QRDQN_SSIM", f"QR-DQN SSIM: ({all_metrics['QRDQN_SSIM']['tiles']} tiles)"),
@@ -238,13 +229,10 @@ def main():
         renderer.generate_timelapse(
             trajectories_by_gen=qrdqn_trajs,
             output_video_path=video_qrdqn,
-            output_gif_path=gif_qrdqn,
-            fps=15,
+            fps=60,
             trail_length=14,
-            gif_duration_ms=125,
-            gif_frame_skip=2,
-            intro_hold_frames=15,
-            outro_hold_frames=30,
+            intro_hold_frames=0,
+            outro_hold_frames=0,
             custom_palette=PALETTE_QRDQN,
             custom_title="POKÉMON FIRERED: 12-ENV QR-DQN (RND vs SSIM)",
             custom_legend=legend_qrdqn,

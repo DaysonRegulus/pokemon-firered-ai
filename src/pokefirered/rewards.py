@@ -3,6 +3,85 @@ import numpy as np
 from skimage.metrics import structural_similarity as ssim
 
 
+# =====================================================================
+# MATHEMATICALLY CALIBRATED MILESTONE REGISTRY
+# Only macro-geographic milestones and major landmarks are rewarded.
+# Trivial interiors (bedrooms, NPC houses, gatehouses) yield 0.0 to prevent
+# artificial handholding and preserve balance with combat (+10) and RND signals.
+# =====================================================================
+MILESTONE_MAP_REWARDS = {
+    # 1. Starting Settlement Exit (Outdoor Breakthrough)
+    (3, 0): (10.0, "Pallet Town Overworld"),
+
+    # 2. Overland Routes
+    (3, 19): (20.0, "Route 1"),
+    (3, 40): (20.0, "Route 22"),
+    (3, 20): (30.0, "Route 2"),
+    (3, 21): (40.0, "Route 3"),
+    (3, 22): (40.0, "Route 4"),
+    (3, 23): (40.0, "Route 5"),
+    (3, 24): (40.0, "Route 6"),
+    (3, 25): (40.0, "Route 7"),
+    (3, 26): (40.0, "Route 8"),
+    (3, 27): (50.0, "Route 9"),
+    (3, 28): (50.0, "Route 10"),
+    (3, 29): (50.0, "Route 11"),
+    (3, 30): (50.0, "Route 12"),
+    (3, 31): (50.0, "Route 13"),
+    (3, 32): (50.0, "Route 14"),
+    (3, 33): (50.0, "Route 15"),
+    (3, 34): (50.0, "Route 16"),
+    (3, 35): (50.0, "Route 17"),
+    (3, 36): (50.0, "Route 18"),
+    (3, 37): (50.0, "Route 19"),
+    (3, 38): (50.0, "Route 20"),
+    (3, 39): (50.0, "Route 21"),
+    (3, 41): (60.0, "Route 23"),
+    (3, 42): (40.0, "Route 24"),
+    (3, 43): (40.0, "Route 25"),
+
+    # 3. Major Cities & Regional Hubs
+    (3, 1): (50.0, "Viridian City"),
+    (3, 2): (100.0, "Pewter City"),
+    (3, 3): (120.0, "Cerulean City"),
+    (3, 4): (150.0, "Vermilion City"),
+    (3, 5): (150.0, "Lavender Town"),
+    (3, 6): (180.0, "Celadon City"),
+    (3, 7): (200.0, "Fuchsia City"),
+    (3, 8): (250.0, "Cinnabar Island"),
+    (3, 10): (220.0, "Saffron City"),
+    (3, 9): (300.0, "Indigo Plateau"),
+
+    # 4. Major Dungeons & Complex Labyrinths
+    (1, 0): (30.0, "Viridian Forest"),
+    (1, 1): (40.0, "Mt. Moon (1F)"),
+    (1, 2): (40.0, "Mt. Moon (B1F)"),
+    (1, 3): (40.0, "Mt. Moon (B2F)"),
+    (1, 4): (50.0, "Rock Tunnel (1F)"),
+    (1, 5): (50.0, "Rock Tunnel (B1F)"),
+    (1, 6): (50.0, "Pokémon Tower (1F)"),
+    (1, 13): (60.0, "Seafoam Islands (1F)"),
+    (1, 18): (80.0, "Victory Road (1F)"),
+    (1, 22): (30.0, "Diglett's Cave"),
+
+    # 5. Major Gym Arenas (Entering the Gym Challenge)
+    (6, 2): (25.0, "Pewter Gym (Brock Arena)"),
+    (5, 1): (50.0, "Viridian Gym Arena"),
+}
+
+# 6. Gym Leader Defeat Badges (Scaled from +250.0 for Brock to +600.0 for Giovanni)
+BADGE_REWARDS = [
+    (250.0, "Boulder Badge (Brock - Pewter Gym)"),
+    (300.0, "Cascade Badge (Misty - Cerulean Gym)"),
+    (350.0, "Thunder Badge (Lt. Surge - Vermilion Gym)"),
+    (400.0, "Rainbow Badge (Erika - Celadon Gym)"),
+    (450.0, "Soul Badge (Koga - Fuchsia Gym)"),
+    (500.0, "Marsh Badge (Sabrina - Saffron Gym)"),
+    (550.0, "Volcano Badge (Blaine - Cinnabar Gym)"),
+    (600.0, "Earth Badge (Giovanni - Viridian Gym)"),
+]
+
+
 class ScreenshotManager:
     def __init__(self, max_bank_size=1000, similarity_threshold=0.1, verbosity=True):
         self.reference_bank = deque(maxlen=max_bank_size)
@@ -66,11 +145,17 @@ class RewardManager:
         self.hp_heal_multiplier = hp_heal_multiplier
         self.level_gain_multiplier = level_gain_multiplier
 
+        # Milestone tracking (calibrated, no handholding)
+        self.visited_maps = set()
+        self.awarded_badges = set()
+        self.prev_badge_byte = 0
+
         self.verbosity = {
             'hp': True,
             'faint': True,
             'exploration': False,
             'general': True,
+            'milestone': True,
         }
 
         BASE = 0x02000000
@@ -113,12 +198,30 @@ class RewardManager:
 
     def initialize(self):
         ram = self.env.unwrapped.get_ram()
+        BASE = 0x02000000
         self.prev_party_hp = [self.get_hp(ram, i) for i in range(6)]
         self.prev_oppn_hp = [self.get_oppn_hp(ram, i) for i in range(6)]
         self.prev_total_hp = sum(self.prev_party_hp)
         self.prev_party_lvl = [self.get_lvl(ram, i) for i in range(6)]
         self.prev_oppn_lvl = [self.get_oppn_lvl(ram, i) for i in range(6)]
         self.prev_total_lvl = sum(self.prev_party_lvl)
+        self.pending_faint = [False] * 6
+        self.faint_count_this_step = 0
+
+        # Initialize spawn map to prevent false discovery on initial frame
+        spawn_bank = int(ram[0x02031DBC - BASE])
+        spawn_num = int(ram[0x02031DBD - BASE])
+        self.visited_maps = {(spawn_bank, spawn_num)}
+
+        # Initialize existing badges to prevent false re-rewarding
+        sb1_ptr = int.from_bytes(ram[0x45008:0x4500C], "little") - BASE
+        if 0 <= sb1_ptr < len(ram) - 0x1000:
+            self.prev_badge_byte = int(ram[sb1_ptr + 0xEE0 + 260])
+            self.awarded_badges = {i for i in range(8) if (self.prev_badge_byte & (1 << i))}
+        else:
+            self.prev_badge_byte = 0
+            self.awarded_badges = set()
+
         self.initialized = True
 
     def capture_screenshot(self, obs):
@@ -130,22 +233,22 @@ class RewardManager:
 
     def get_hp(self, ram, index):
         addr = self.hp_addresses[index]
-        return ram[addr] + (ram[addr + 1] << 8)
+        return int(ram[addr]) | (int(ram[addr + 1]) << 8)
 
     def get_lvl(self, ram, index):
         addr = self.lvl_addresses[index]
-        return (ram[addr] << 8) + ram[addr + 1]
+        return (int(ram[addr]) << 8) | int(ram[addr + 1])
 
     def get_oppn_hp(self, ram, index):
         addr = self.oppn_hp_addresses[index]
-        return ram[addr] + (ram[addr + 1] << 8)
+        return int(ram[addr]) | (int(ram[addr + 1]) << 8)
 
     def get_oppn_lvl(self, ram, index):
         addr = self.oppn_lvl_addresses[index]
-        return (ram[addr] << 8) + ram[addr + 1]
+        return (int(ram[addr]) << 8) | int(ram[addr + 1])
 
     def calculate_avg_level(self, levels):
-        valid_levels = [lvl for lvl in levels if lvl > 0]
+        valid_levels = [lvl for lvl in levels if 0 < lvl <= 100]
         return sum(valid_levels) / len(valid_levels) if valid_levels else 0
 
     def get_level_multiplier(self, player_avg, opponent_avg):
@@ -243,7 +346,8 @@ class RewardManager:
         # --- Level Gain Reward ---
         level_diff = 0
         for i in range(6):
-            if self.prev_party_lvl[i] > 0:  # Only count level-ups for Pokémon that were already in the party
+            # Only count true level gains for Pokémon that were already in the party
+            if self.prev_party_lvl[i] > 0 and 0 < current_party_lvl[i] <= 100 and current_party_lvl[i] > self.prev_party_lvl[i]:
                 level_diff += current_party_lvl[i] - self.prev_party_lvl[i]
 
         if level_diff > 0:
@@ -257,6 +361,35 @@ class RewardManager:
                 total_reward += 10  # Fixed reward for catching a new Pokémon
                 if self.verbosity['general']:
                     print(f"[REWARD][CATCH] A new Pokémon was caught in slot {i + 1} (+10)")
+
+        # --- Mathematically Calibrated Milestone Rewards (No Handholding, Scaled to Combat/RND Signals) ---
+        BASE = 0x02000000
+        current_map_bank = int(ram[0x02031DBC - BASE])
+        current_map_num = int(ram[0x02031DBD - BASE])
+        current_map = (current_map_bank, current_map_num)
+
+        if current_map not in self.visited_maps:
+            self.visited_maps.add(current_map)
+            # Only reward legitimate macro milestones in the registry.
+            # Trivial interiors (bedrooms, random NPC houses, gatehouses) yield 0.0 to prevent handholding.
+            if current_map in MILESTONE_MAP_REWARDS:
+                reward_val, area_name = MILESTONE_MAP_REWARDS[current_map]
+                total_reward += reward_val
+                if self.verbosity.get('milestone', True):
+                    print(f"[MILESTONE][DISCOVERY] Milestone Reached: {area_name} (+{reward_val:.1f})")
+
+        # --- Massive Milestone: Defeating Gym Leaders / Winning Gym Badges (+250.0 to +600.0) ---
+        sb1_ptr = int.from_bytes(ram[0x45008:0x4500C], "little") - BASE
+        if 0 <= sb1_ptr < len(ram) - 0x1000:
+            current_badge_byte = int(ram[sb1_ptr + 0xEE0 + 260])
+            for b_idx in range(8):
+                if (current_badge_byte & (1 << b_idx)) and (b_idx not in self.awarded_badges):
+                    self.awarded_badges.add(b_idx)
+                    badge_reward, badge_name = BADGE_REWARDS[b_idx]
+                    total_reward += badge_reward
+                    if self.verbosity.get('milestone', True):
+                        print(f"[MILESTONE][GYM_LEADER] Defeated Gym Leader! Earned {badge_name} (+{badge_reward:.1f})")
+            self.prev_badge_byte = current_badge_byte
 
         # Store new values
         self.prev_party_hp = current_party_hp

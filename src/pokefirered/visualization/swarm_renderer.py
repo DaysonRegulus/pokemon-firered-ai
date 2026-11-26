@@ -171,31 +171,42 @@ class SwarmRenderer:
 
         # Top-Left Telemetry Card
         hud_x, hud_y = 12, 12
-        hud_w, hud_h = 320, 116
-        draw.rectangle([hud_x, hud_y, hud_x + hud_w, hud_y + hud_h], fill=(10, 16, 24, 220), outline=(0, 200, 255, 230), width=1)
+        hud_w, hud_h = 330, 120
+        draw.rectangle([hud_x, hud_y, hud_x + hud_w, hud_y + hud_h], fill=(10, 16, 24, 225), outline=(0, 200, 255, 230), width=1)
 
         title = custom_title or "POKEMON FIRERED GBA: SWARM VIZ"
         draw.text((hud_x + 10, hud_y + 8), title, fill=(0, 230, 255, 255))
         draw.line([hud_x + 10, hud_y + 24, hud_x + hud_w - 10, hud_y + 24], fill=(0, 140, 180, 180), width=1)
 
-        draw.text((hud_x + 10, hud_y + 28), f"Step: {step_idx:,} / {total_steps:,}", fill=(225, 225, 225, 255))
+        pct = min(1.0, max(0.0, step_idx / max(1, total_steps)))
+        draw.text((hud_x + 10, hud_y + 28), f"Step: {step_idx:,} / {total_steps:,} ({pct*100:.1f}%)", fill=(225, 225, 225, 255))
+
+        # Progress bar
+        bar_x = hud_x + 10
+        bar_y = hud_y + 44
+        bar_w = hud_w - 20
+        bar_h = 4
+        draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], fill=(30, 40, 50, 255))
+        if pct > 0:
+            draw.rectangle([bar_x, bar_y, bar_x + int(bar_w * pct), bar_y + bar_h], fill=(0, 230, 255, 255))
 
         if group_tiles:
             # Multi-group tile discovery breakdown
             g_strs = [f"{k}: {v}" for k, v in group_tiles.items()]
             line1 = " | ".join(g_strs[:2])
             line2 = " | ".join(g_strs[2:])
-            draw.text((hud_x + 10, hud_y + 44), f"Tiles: {line1}", fill=(50, 240, 120, 255))
+            draw.text((hud_x + 10, hud_y + 52), f"Tiles: {line1}", fill=(50, 240, 120, 255))
             if line2:
-                draw.text((hud_x + 10, hud_y + 58), f"       {line2}", fill=(50, 240, 120, 255))
-            draw.text((hud_x + 10, hud_y + 74), f"Frontier: {frontier_landmark.upper()}", fill=(255, 190, 40, 255))
+                draw.text((hud_x + 10, hud_y + 66), f"       {line2}", fill=(50, 240, 120, 255))
+            frontier_y = hud_y + 80 if line2 else hud_y + 68
+            draw.text((hud_x + 10, frontier_y), f"Frontier: {frontier_landmark.upper()}", fill=(255, 190, 40, 255))
         else:
-            draw.text((hud_x + 10, hud_y + 44), f"Unique Tiles Discovered: {unique_tiles:,}", fill=(50, 240, 120, 255))
-            draw.text((hud_x + 10, hud_y + 60), f"Frontier: {frontier_landmark.upper()}", fill=(255, 190, 40, 255))
+            draw.text((hud_x + 10, hud_y + 52), f"Unique Tiles Discovered: {unique_tiles:,}", fill=(50, 240, 120, 255))
+            draw.text((hud_x + 10, hud_y + 68), f"Frontier: {frontier_landmark.upper()}", fill=(255, 190, 40, 255))
 
         badge_txt = "BOULDER BADGE: ACQUIRED [1/8]" if boulder_badge else "BOULDER BADGE: LOCKED [0/8]"
         badge_col = (40, 240, 60, 255) if boulder_badge else (120, 140, 240, 255)
-        badge_y = hud_y + 92 if group_tiles else hud_y + 78
+        badge_y = hud_y + 96 if (group_tiles and len(group_tiles) > 2) else hud_y + 84
         draw.text((hud_x + 10, badge_y), badge_txt, fill=badge_col)
 
         # Bottom-Right Legend
@@ -227,16 +238,15 @@ class SwarmRenderer:
         trajectories_by_gen: Dict[Any, List[List[Tuple[int, int, int, int]]]],
         output_video_path: Path,
         output_gif_path: Optional[Path] = None,
-        fps: int = 15,
+        fps: int = 60,
         trail_length: int = 14,
-        gif_duration_ms: int = 125,
-        gif_frame_skip: int = 2,
-        intro_hold_frames: int = 15,
-        outro_hold_frames: int = 30,
+        intro_hold_frames: int = 0,
+        outro_hold_frames: int = 0,
         custom_palette: Optional[Dict[Any, Tuple[int, int, int]]] = None,
         custom_title: Optional[str] = None,
         custom_legend: Optional[List[Tuple[Any, str]]] = None,
-        group_tiles: Optional[Dict[str, int]] = None
+        group_tiles: Optional[Dict[str, int]] = None,
+        **kwargs
     ):
         """
         Renders multi-generation or multi-condition agent trajectories onto the canonical 32-bit GBA FireRed map.
@@ -282,8 +292,6 @@ class SwarmRenderer:
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out_writer = cv2.VideoWriter(str(output_video_path), fourcc, fps, (self.viewport_w, self.viewport_h))
-
-        gif_frames = []
 
         # Smooth camera state centered on Pallet Town (px=1152, py=4336)
         cam_x, cam_y = 1152.0, 4336.0
@@ -429,40 +437,20 @@ class SwarmRenderer:
             rgb_arr = np.array(frame.convert("RGB"))
             bgr_arr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
 
-            # Intro hold: hold frame at step 0 so viewer can register the initial setup
-            if step == 0:
+            # Intro hold: hold frame at step 0 so viewer can register the initial setup (if enabled)
+            if step == 0 and intro_hold_frames > 0:
                 for _ in range(intro_hold_frames):
                     out_writer.write(bgr_arr)
-                    if output_gif_path:
-                        gif_frames.append(frame.convert("RGB"))
 
             out_writer.write(bgr_arr)
 
-            # Capture GIF frames
-            if output_gif_path and (step % gif_frame_skip == 0):
-                gif_frames.append(frame.convert("RGB"))
-
-            # Outro hold: hold final frame on Brock & Boulder badge victory
-            if step == max_steps - 1:
+            # Outro hold: hold final frame on victory / milestone (if enabled)
+            if step == max_steps - 1 and outro_hold_frames > 0:
                 for _ in range(outro_hold_frames):
                     out_writer.write(bgr_arr)
-                    if output_gif_path:
-                        gif_frames.append(frame.convert("RGB"))
 
             if (step + 1) % 50 == 0 or step == max_steps - 1:
                 print(f"  [RENDER PROGRESS] Step {step+1:3d}/{max_steps:3d} | Cam: ({int(cam_x)}, {int(cam_y)}) | Frontier: {frontier_landmark}")
 
         out_writer.release()
         print(f"[SUCCESS] Exported 32-bit GBA FireRed swarm video: {output_video_path}")
-
-        if output_gif_path and gif_frames:
-            print(f"[SWARM RENDERER] Compiling animated GIF ({len(gif_frames)} frames @ {gif_duration_ms}ms/frame)...")
-            gif_frames[0].save(
-                str(output_gif_path),
-                save_all=True,
-                append_images=gif_frames[1:],
-                duration=gif_duration_ms,
-                loop=0,
-                optimize=True
-            )
-            print(f"[SUCCESS] Exported authentic GBA FireRed showcase GIF: {output_gif_path}")

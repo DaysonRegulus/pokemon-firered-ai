@@ -2246,3 +2246,306 @@ Gen 1 (Mom's 1F) ----> Gen 20 (Pallet Town Overworld) ----> Gen 53 (504 Unique T
 * **Living Telemetry Report**: [`checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md).
 * **Master Stitched Video**: [`visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4) (15,390 frames, 15.0 FPS, 17.1 minutes side-by-side timelapse spanning all 54 generations).
 * **Generation Snapshots**: Complete model checkpoints, optimizers, replay buffers, and trajectories preserved for every generation from `_gen001` to `_gen054` in `checkpoints/benchmark_rnd_curriculum/`.
+
+---
+
+## Phase 23: 4,200,000+ Step Deep Continuous Horizon Benchmark: Distributional QR-DQN (+ PER) vs. PPO with Dynamic Curriculum and Resilient RND Exploration
+
+Following the validation of the 1,000,000-step baseline in Phase 22, the long-horizon benchmark was extended across **Generations 55 through 82**, crossing **4,200,000 cumulative environment steps per model** ($4,261,888$ steps per algorithm; **$8,523,776$ total environment transitions** across 8 parallel environments on CUDA).
+
+### 1. Architectural & Experimental Configuration
+
+- **Algorithmic Comparison**: Distributional Quantile Regression DQN (QR-DQN with Prioritized Experience Replay, $N=32$ quantiles, $\kappa=1.0$) vs. On-Policy Proximal Policy Optimization (PPO, clipping $\epsilon_{\text{clip}}=0.2$).
+- **Curiosity Formulation**: Random Network Distillation (RND) with running observation normalization ($\mu_{\text{obs}}, \sigma_{\text{obs}}$), running intrinsic return variance scaling ($\sigma_{\text{running}}$), and reward clipping ($r_{\text{cap}} = 5.0$).
+- **Dynamic Curriculum Horizon Formula**:
+  $$T_g = \max\left(2048, \text{round}\left(\frac{4096 + 0.05 \times \text{lifetime}}{2048}\right) \times 2048\right)$$
+  Scaling the generation horizon dynamically from $55,296$ steps (Gen 55) up to **$206,848$ steps** (Gen 82).
+- **Exploration Preservation Guarantees**:
+  - QR-DQN: $\epsilon$-decay scheduled over $5,000,000$ steps with an absolute exploration floor of $\epsilon_{\text{floor}} = 0.20$. In Generation 82, $\epsilon \approx 0.231$.
+  - PPO: Entropy regularization coefficient fixed at $\beta_{\text{ent}} = 0.08$.
+- **Environment Invariant**: Active save state `BeginningPalletGotPokeballs.state`, spawning on Map `(4, 0)` (Hero's 1F) with Bulbasaur (Level 5) and initial Pokéballs delivered.
+
+---
+
+### 2. Longitudinal Empirical Telemetry (Generations 55–82 Milestones)
+
+| Gen | Algorithm | Steps This Gen | Cumulative Lifetime | SPS | Elapsed (s) | Unique Tiles | Maps | Intrinsic R | Extrinsic R |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **55** | **QRDQN** | 55,296 | 1,083,392 | 109.2 | 506.3s | **430** | 5 | 652.66 | 0.00 |
+| **55** | **PPO** | 55,296 | 1,083,392 | 49.5 | 1117.8s | **264** | 4 | 122.63 | 10.00 |
+| **60** | **QRDQN** | 71,680 | 1,404,928 | 271.9 | 263.6s | **349** | 4 | 826.12 | 0.00 |
+| **60** | **PPO** | 71,680 | 1,404,928 | 119.4 | 600.4s | **409** | 5 | 274.81 | 0.00 |
+| **65** | **QRDQN** | 90,112 | 1,814,528 | 275.7 | 326.9s | **344** | 5 | 624.30 | -25.00 |
+| **65** | **PPO** | 90,112 | 1,814,528 | 118.6 | 760.1s | **522** | 6 | 319.73 | -15.00 |
+| **70** | **QRDQN** | 114,688 | 2,338,816 | 273.6 | 419.2s | **459** | 5 | 1040.55 | 0.00 |
+| **70** | **PPO** | 114,688 | 2,338,816 | 118.7 | 965.9s | **554** | 6 | 795.74 | 0.00 |
+| **74** | **QRDQN** | 139,264 | 2,859,008 | 281.5 | 494.8s | **402** | 4 | 642.16 | 0.00 |
+| **74** | **PPO** | 139,264 | 2,859,008 | 118.2 | 1177.7s | **595** | 6 | 723.79 | 25.00 |
+| **75** | **QRDQN** | 147,456 | 3,006,464 | 284.3 | 518.6s | **307** | 4 | 713.36 | 0.00 |
+| **75** | **PPO** | 147,456 | 3,006,464 | 120.3 | 1225.4s | **605** | 6 | 644.97 | 5.00 |
+| **78** | **QRDQN** | 169,984 | 3,491,840 | 261.2 | 650.7s | **388** | 5 | 2307.21 | 0.00 |
+| **78** | **PPO** | 169,984 | 3,491,840 | 118.6 | 1432.9s | **461** | 4 | 268.18 | -0.00 |
+| **80** | **QRDQN** | 188,416 | 3,858,432 | 282.5 | 666.9s | **424** | 4 | 941.45 | -220.00 |
+| **80** | **PPO** | 188,416 | 3,858,432 | 119.1 | 1581.8s | **633** | 6 | 795.29 | 0.00 |
+| **81** | **QRDQN** | 196,608 | 4,055,040 | 283.1 | 694.4s | **527** | 5 | 750.86 | 45.00 |
+| **81** | **PPO** | 196,608 | 4,055,040 | 119.3 | 1647.7s | **653** | 6 | 996.88 | -0.00 |
+| **82** | **QRDQN** | 206,848 | 4,261,888 | 281.9 | 733.7s | **656** | 6 | 1728.89 | 5.00 |
+| **82** | **PPO** | 206,848 | 4,261,888 | 119.6 | 1729.3s | **604** | 6 | 833.46 | -15.00 |
+
+*(Full 164-entry generation ledger recorded in [`BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md).)*
+
+---
+
+### 3. Key Findings & Empirical Analysis
+
+1. **New All-Time Exploration Record (656 Unique Tiles)**:
+   - In Generation 82, **QR-DQN (+ PER)** shattered the previous exploration frontier record by charting **656 unique tiles** across 6 distinct maps in a single 206,848-step rollout, driven by an intrinsic curiosity return of $1,728.89$.
+   - **PPO** mirrored this breakthrough in Generation 81, discovering **653 unique tiles** across 6 maps with an intrinsic return of $996.88$.
+   - Both models demonstrated sustained multi-room and cross-route exploration, navigating Mom's 1F `(4, 0)`, Bedroom 2F `(4, 1)`, Pallet Town Overworld `(3, 0)`, Oak's Lab `(4, 2)`, Rival's House `(4, 3)`, and Route 1 `(3, 19)`.
+2. **Elimination of Exploitation Trapping**:
+   - Despite cumulative training past 4.2 million steps, neither algorithm experienced policy collapse or local attractor trapping.
+   - The combination of a 5,000,000-step linear $\epsilon$ decay with a $0.20$ floor for QR-DQN and $\beta_{\text{ent}} = 0.08$ policy entropy for PPO maintained high behavioral variance and robust doorway traversal through narrow bottleneck transitions.
+3. **Hardware Throughput & Scaling Consistency**:
+   - Throughput remained stable under heavy horizon scaling:
+     - **QR-DQN (+ PER)**: Sustained **$261\text{--}302$ SPS** on CUDA.
+     - **PPO**: Sustained **$118\text{--}120$ SPS** on CUDA.
+   - Total continuous execution time for Generations 74–82: $\sim6.3$ hours, cleanly terminating on schedule.
+4. **Zero-Redundancy Resumption & Artifact Integrity**:
+   - Fast-resume validated: Historical generations were skipped in milliseconds without re-encoding existing MP4s.
+   - All 82 generations were compiled into the master stitched chronological video (`stitched_chronological_benchmark.mp4`), capturing **213,978 frames** of continuous real-time GBA emulation.
+
+---
+
+### 4. Verified Master Artifacts
+
+* **State Ledger**: [`checkpoints/benchmark_rnd_curriculum/benchmark_state.json`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/benchmark_state.json) (`last_completed_generation: 82`, `qrdqn_lifetime_steps: 4261888`, `ppo_lifetime_steps: 4261888`).
+* **Living Telemetry Report**: [`checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md).
+* **Master Stitched Video**: [`visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4) (213,978 frames, 15.0 FPS, side-by-side timelapse spanning all 82 generations).
+* **Generation Snapshots**: Complete model checkpoints, optimizers, replay buffers, and full un-truncated trajectories preserved for every generation from `_gen001` to `_gen082` in `checkpoints/benchmark_rnd_curriculum/`.
+
+---
+
+## Phase 24: 6,000,000+ Step Deep Frontier Exploration & RAM Arithmetic Type Safety Remediation (Generations 83–89)
+
+Following the 4.2M milestone in Phase 23, the benchmark was extended across **Generations 83 through 89**, crossing **6,000,000 cumulative environment steps per model** ($6,029,312$ steps per algorithm; **$12,058,624$ total environment transitions** across 8 parallel environments on CUDA).
+
+### 1. Root Cause Analysis & Architectural Remediation
+
+#### A. NumPy uint8 Underflow and 16-Bit Truncation Elimination
+- **Empirical Symptom**: The previous benchmark log exhibited 18 `RuntimeWarning: overflow encountered in scalar subtract/add` entries in `rewards.py:247`.
+- **Root Cause Deconstruction**:
+  - `ram = env.get_ram()` returns a NumPy `uint8` buffer. `get_hp` and `get_lvl` returned `np.uint8` scalars.
+  - In `get_hp`, `ram[addr] + (ram[addr+1] << 8)` performed 8-bit bitshifts on `np.uint8`, truncating any HP values $> 255$ back to 0 (`np.uint8(1) << 8 == 0`).
+  - The agent legitimately caught wild Pokémon in slots 2 and 3 during Route 1 tall grass exploration (`[REWARD][CATCH]`). When both Pokémon fainted in battle, a blackout occurred or the environment reset upon episode completion, reverting Slot 2 from Level 3 to 0.
+  - In `calculate_rewards`, `level_diff += current_party_lvl[i] - self.prev_party_lvl[i]` evaluated `np.uint8(0) - np.uint8(3)`, which underflowed to `np.uint8(253)`, triggering the warning and falsely awarding $+253$ level difference reward.
+- **Architectural Fix**:
+  - Promoted all raw memory bytes in `get_hp`, `get_lvl`, `get_oppn_hp`, and `get_oppn_lvl` to standard arbitrary-precision Python `int`:
+    $$\text{HP} = \text{int}(\text{ram}[a]) \mid (\text{int}(\text{ram}[a+1]) \ll 8)$$
+    $$\text{Lvl} = (\text{int}(\text{ram}[a]) \ll 8) \mid \text{int}(\text{ram}[a+1])$$
+  - Guarded level differences to strictly reward genuine positive level gains on valid levels:
+    $$\text{level\_diff} += \text{curr} - \text{prev} \quad \text{iff} \quad \text{prev} > 0 \land 0 < \text{curr} \le 100 \land \text{curr} > \text{prev}$$
+  - Added state reset for `pending_faint` and `faint_count_this_step` in `initialize()`.
+  - Unit-tested via `scratch/verify_rewards_fix.py`: Verified catches, legitimate faints, level drops on blackout (0 reward, 0 warnings), and 300 HP reading. In the subsequent 1.76M-step rollout (Gen 83–89), **exactly 0 warnings or errors were recorded across 2.5M log lines**.
+
+#### B. Deferral of Master Timeline Stitching
+- Master chronological video re-encoding ($4.6\text{ GB}$, $213\text{k}+$ frames) was deferred from per-generation execution to milestone conclusion, eliminating the $\mathcal{O}(G^2)$ video decoding/encoding disk thrashing.
+
+---
+
+### 2. Longitudinal Empirical Telemetry (Generations 83–89)
+
+| Gen | Algorithm | Steps This Gen | Cumulative Lifetime | SPS | Elapsed (s) | Unique Tiles | Maps | Intrinsic R | Extrinsic R |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **83** | **QRDQN** | 217,088 | 4,478,976 | 283.8 | 764.9s | **451** | 4 | 1018.15 | +130.00 |
+| **83** | **PPO** | 217,088 | 4,478,976 | 120.2 | 1806.4s | **584** | 6 | 748.77 | 0.00 |
+| **84** | **QRDQN** | 227,328 | 4,706,304 | 283.4 | 802.1s | **376** | 4 | 2669.12 | 0.00 |
+| **84** | **PPO** | 227,328 | 4,706,304 | 120.4 | 1887.9s | **442** | 4 | 857.51 | 0.00 |
+| **85** | **QRDQN** | 239,616 | 4,945,920 | 286.8 | 835.5s | **461** | 6 | 2428.89 | -10.00 |
+| **85** | **PPO** | 239,616 | 4,945,920 | 120.6 | 1986.9s | **530** | 5 | 621.41 | +325.00 |
+| **86** | **QRDQN** | 251,904 | 5,197,824 | 287.6 | 875.8s | **391** | 4 | 1606.43 | 0.00 |
+| **86** | **PPO** | 251,904 | 5,197,824 | 119.6 | 2105.9s | **644** | 6 | 1408.94 | +665.00 |
+| **87** | **QRDQN** | 264,192 | 5,462,016 | 286.6 | 921.8s | **497** | 5 | 3033.11 | 0.00 |
+| **87** | **PPO** | 264,192 | 5,462,016 | 120.4 | 2195.0s | **525** | 6 | 735.29 | -10.00 |
+| **88** | **QRDQN** | 276,480 | 5,738,496 | 286.3 | 965.7s | **388** | 4 | 1799.11 | 0.00 |
+| **88** | **PPO** | 276,480 | 5,738,496 | 120.4 | 2296.0s | **713** | 6 | 1648.79 | +10.00 |
+| **89** | **QRDQN** | 290,816 | 6,029,312 | 278.8 | 1043.1s | **499** | 5 | 2865.96 | -10.00 |
+| **89** | **PPO** | 290,816 | 6,029,312 | 119.0 | 2444.0s | **606** | 6 | 1073.17 | 0.00 |
+
+*(Full 178-entry generation ledger recorded in [`BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md).)*
+
+---
+
+### 3. Key Findings & Empirical Breakthroughs
+
+1. **New All-Time Exploration Milestone (713 Unique Tiles)**:
+   - In **Generation 88**, **PPO achieved an all-time project record of 713 unique tiles across 6 distinct maps** in a single 276,480-step rollout ($R_{\text{int}} = 1,648.79$).
+   - PPO consistently maintained broad spatial coverage, achieving $584$ tiles (Gen 83), $644$ tiles (Gen 86), and $606$ tiles (Gen 89).
+2. **First Sustained In-Game Combat & Level-Up Milestones**:
+   - In **Generation 86**, PPO recorded **$+665.0$ in extrinsic rewards**, featuring **36 distinct in-game level-ups**, 8 wild Pokémon defeated, and 4 wild Pokémon caught in Pokéballs across the 8 parallel environments.
+   - The agent is actively engaging with Pokémon FireRed combat mechanics rather than merely navigating terrain.
+3. **Throughput & Horizon Scaling**:
+   - QR-DQN (+ PER) sustained **$278.8\text{--}287.6$ SPS**.
+   - PPO sustained **$119.0\text{--}120.6$ SPS**.
+   - Generation 89 dynamic curriculum reached $290,816$ steps per model ($581,632$ steps per generation).
+4. **Master Visual Timeline**:
+   - The compiled master timelapse `stitched_chronological_benchmark.mp4` now spans **435,221 frames** ($\approx 8.06\text{ hours}$ of authentic $1\times$ real-time emulation) across all 89 generations.
+
+---
+
+### 4. Verified Master Artifacts
+
+* **State Ledger**: [`checkpoints/benchmark_rnd_curriculum/benchmark_state.json`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/benchmark_state.json) (`last_completed_generation: 89`, `qrdqn_lifetime_steps: 6029312`, `ppo_lifetime_steps: 6029312`).
+* **Living Telemetry Report**: [`checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_rnd_curriculum/BENCHMARK_RND_CURRICULUM_REPORT.md).
+* **Master Stitched Video**: [`visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4) (435,221 frames, 15.0 FPS, side-by-side timelapse spanning all 89 generations).
+* **Generation Snapshots**: Complete model checkpoints, optimizers, replay buffers, and full un-truncated trajectories preserved for every generation from `_gen001` to `_gen089` in `checkpoints/benchmark_rnd_curriculum/`.
+
+
+---
+
+## Phase 25: 60 FPS Video Synthesis, 4x Real-Time Emulation Speed Standard Migration, and Zero Hold Frame Elimination
+
+**Date**: November 26, 2026  
+**Status**: COMPLETE & ARCHITECTURALLY VERIFIED (60 FPS / 4x Real-Time Playback Standard, Zero Intro/Outro Hold Invariant, All 89 Generation Videos Upgraded & Master Timeline Re-Stitched)
+
+### 1. Root Motivation & Mathematical Speed Formulation
+
+As curriculum horizons scaled past Generation 80 (> 200,000 steps per generation), the historical $15\text{ FPS}$ ($1\times$ real-time) video synthesis standard introduced a severe operational inspection bottleneck:
+- **Playback Duration Bloat**: A single Generation 89 rollout ($36,352$ rendered steps) at $15\text{ FPS}$ required **$40.4\text{ minutes}$** of continuous video playback. The master chronological stitched video spanning all 89 generations ballooned to **$435,221\text{ frames}$** ($\approx 8.06\text{ hours}$ of continuous video), making rapid empirical review of multi-generation breakthroughs computationally and practically prohibitive.
+- **Visual Stutter & Motion Discontinuity**: At $15\text{ FPS}$, sprite movement exhibited noticeable stepping artifacts on modern $60\text{ Hz} / 120\text{ Hz}$ display panels.
+
+#### Mathematical Derivation of the 4x Real-Time Playback Standard
+
+The Game Boy Advance hardware executes video refresh at $f_{\text{GBA}} \approx 59.7275 \approx 60.0\text{ Hz}$. In the vectorized reinforcement learning environment, temporal abstraction is handled via frame skipping:
+$$k = 4 \quad (\text{emulator frames per environment action step})$$
+
+Each recorded trajectory point corresponds to exactly 1 environment step ($4\text{ GBA frames}$). When rendered and displayed at a video playback framerate of $f_{\text{video}} = 60.0\text{ FPS}$:
+$$\text{Playback Throughput} = 60.0 \frac{\text{env steps}}{\text{second}} \times 4 \frac{\text{GBA frames}}{\text{step}} = 240.0 \frac{\text{GBA frames}}{\text{second}}$$
+
+Relative to authentic GBA real-time emulation speed ($60.0\text{ frames/second}$):
+$$\text{Speed Multiplier} = \frac{240.0\text{ frames/sec}}{60.0\text{ frames/sec}} = \mathbf{4.0\times} \text{ Real-Time Game Speed}$$
+
+At $4.0\times$ speed:
+- Single-generation review time drops from $40.4\text{ minutes}$ to $\approx 10.1\text{ minutes}$.
+- The full 89-generation master timeline playback duration is compressed from $8.06\text{ hours}$ down to $\approx 2.01\text{ hours}$.
+- Avatars move fluidly across the Kanto terrain without perceptible telemetric jitter, while HUD elements (step counters, map identifiers, frontier landmarks, unique tile counts) remain crisp, legible, and easy to track.
+
+---
+
+### 2. Elimination of Hold Frames (The Zero Hold Invariant)
+
+#### A. Pathology of Intro/Outro Hold Padding
+
+Historical generation videos incorporated static hold padding at trajectory boundaries:
+- At $15\text{ FPS}$: $15\text{ intro frames}$ ($1.0\text{s}$) and $30\text{ outro frames}$ ($2.0\text{s}$).
+- When scaling to $60\text{ FPS}$, preserving equivalent temporal holds required $60\text{ intro}$ and $120\text{ outro frames}$ ($180\text{ duplicate frames}$ per video).
+- **The Stitched Timeline Discontinuity Defect**: When compiling sequential generations into the master chronological video (`stitched_chronological_benchmark.mp4`), each boundary concatenation retained both the preceding generation's outro hold and the succeeding generation's intro hold. Across 89 generations, this injected over **$16,000\text{ redundant frozen frames}$** ($\sim 4.5\text{ minutes}$ of static pauses), breaking visual continuity and distorting comparative agent trajectory flow.
+
+#### B. Architectural Elimination Across All Rendering Engines
+
+All visual rendering engines were permanently updated to enforce `intro_hold_frames = 0` and `outro_hold_frames = 0`:
+1. **`SwarmRenderer.generate_timelapse`** ([`src/pokefirered/visualization/swarm_renderer.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/visualization/swarm_renderer.py)):
+   - Default arguments updated: `intro_hold_frames: int = 0`, `outro_hold_frames: int = 0`.
+   - Hold loops guarded by explicit positivity checks (`if step == 0 and intro_hold_frames > 0:` and `if step == max_steps - 1 and outro_hold_frames > 0:`), ensuring zero extra frames are written.
+2. **Benchmark Generation Pipelines** ([`scripts/run_benchmark.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/run_benchmark.py)):
+   - Configured to export generation timelapses at $60\text{ FPS}$ with zero holds.
+3. **Visualizer & Comparison Scripts**:
+   - [`scripts/visualize_benchmark_swarms.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/visualize_benchmark_swarms.py), [`scripts/visualize_12env_comparison.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/visualize_12env_comparison.py), and [`scripts/generate_swarm_animation.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/generate_swarm_animation.py) updated to `fps=60`, `intro_hold_frames=0`, `outro_hold_frames=0`.
+4. **Project Rule Persistence (`AGENTS.md`)**:
+   - Section 6, Rule 5 updated to enforce the architectural standard:
+     *“Trajectory recordings must never be truncated (recording full generation trajectories to the final step) and rendered at **60 FPS** representing **4x real-time game speed** (with 4-frame skip, 0 intro/outro hold frames).”*
+
+---
+
+### 3. Comprehensive Batch Transcoding & Seamless Timeline Compilation
+
+To ensure complete backward compatibility and uniform repository integrity across all historical evidence, [`scripts/update_videos_to_60fps.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/update_videos_to_60fps.py) was developed and executed using a 4-worker multiprocessing pool:
+- **115 Video Files Upgraded**:
+  - 89 benchmark generation videos (`visual_evidence/benchmark_rnd_curriculum/benchmark_rnd_curriculum_gen001.mp4` through `gen089.mp4`).
+  - 6 comparative swarm videos in `visual_evidence/swarm_visualizer/`.
+  - 20 historical archive videos in `visual_evidence/archive/benchmark_rnd_curriculum_v1/`.
+- **Hold Stripping Precision**:
+  - Legacy $15\text{ FPS}$ videos had their $15\text{ intro}$ and $30\text{ outro}$ frames cleanly excised.
+  - Converted videos were validated against trajectory step counts $N$: every video contains **exactly $N$ frames** running at $60.0\text{ FPS}$ ($1\text{ frame per environment step}$).
+- **Master Chronological Timeline Stitching**:
+  - `visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4` re-compiled at $60.0\text{ FPS}$ across all 89 generations (`431,216 frames`, `7,186.9s` / `2.00 hours`).
+  - With zero hold frames at generation boundaries, the master video plays as an unbroken, continuous multi-generation evolutionary progression from Generation 1 to Generation 89.
+
+---
+
+### 4. Verified Master Artifacts
+
+* **Updated Project Rule File**: [`AGENTS.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/AGENTS.md) (Section 6, Rule 5 updated).
+* **Generation Videos**: Complete set of 89 videos in [`visual_evidence/benchmark_rnd_curriculum/`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_rnd_curriculum/) rendered at $60\text{ FPS}$, $4\times$ speed, $0\text{ holds}$.
+* **Master Stitched Video**: [`visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_rnd_curriculum/stitched_chronological_benchmark.mp4) ($60.0\text{ FPS}$, $431,216$ frames, seamless generation transitions).
+* **Video Migration Engine**: [`scripts/update_videos_to_60fps.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/update_videos_to_60fps.py).
+
+
+---
+
+## Phase 26: Mathematically Calibrated Milestone Reward Architecture: Anti-Handholding Calibration & Value Function Equilibrium
+
+**Date**: November 26, 2026  
+**Status**: IMPLEMENTED & MATHEMATICALLY VERIFIED (Full Unit Test Suite Passed, Anti-Handholding Guards Verified)
+
+### 1. Root Cause Forensics: The Handholding & Reward Scale Dilemma
+
+While macroscopic goals are necessary to overcome the habituation plateau of pure visual RND in starting settlements, naive milestone shaping creates two severe failure modes:
+1. **The Indoor Trapping Incentive Trap (The Bedroom Paradox)**:
+   - If trivial interior rooms (e.g. Hero's Bedroom 2F `(4, 1)`) award substantial bonuses (e.g. $+50.0$), the discounted return from spawn $G = \gamma^5 \times 50.0 = 47.5$ exceeds the discounted return of traversing the entire 40-tile corridor of Route 1 to reach Viridian City ($G \approx 46.4$). The agent is mathematically incentivized to stay inside the house, scouring dead-end bedrooms rather than embarking on the overland quest.
+2. **Signal Drowning & Value Clipping**:
+   - In-game combat signals award $+10.0$ per level-up, $+10.0$ per catch, and $+10.0\text{--}20.0$ per wild knockout, with faint penalties of $-5.0$. If milestone rewards are disproportionately massive ($+100$ per room, $+500$ per milestone), the cumulative milestone sum ($> +2,000$) completely overwhelms the combat and intrinsic curiosity loss gradients, inducing value function instability in QR-DQN and surrogate ratio clipping saturation in PPO.
+
+### 2. Mathematically Calibrated Milestone Architecture
+
+To maintain strict balance with the underlying combat and RND reward scales while eliminating artificial handholding, the milestone registry was redesigned around rigorous economic principles:
+
+#### A. Elimination of Trivial Interior Handholding ($0.0$ Reward)
+- **Dead-End Interior Rooms**: Hero's Bedroom 2F `(4, 1)`, Rival's House `(4, 3)`, Oak's Lab `(4, 2)`, Gatehouses `(15, X)`, and generic NPC homes award **strictly $0.0$ extrinsic reward**.
+- Agents receive zero artificial reward for wandering inside domestic rooms.
+
+#### B. Scaled Geographic Milestone Progression
+Milestone rewards are explicitly calibrated against the topological distance $d$ from Pallet Town and discounted horizon dynamics ($\gamma = 0.99$):
+- **Pallet Town Overworld `(3, 0)`**: **$+10.0$** (First outdoor breakthrough; equivalent to 1 Pokémon catch or 1 level-up).
+- **Route 1 `(3, 19)` & Route 22 `(3, 40)`**: **$+20.0$** (First overland wild corridors; equivalent to 2 wild battle knockouts).
+- **Route 2 `(3, 20)`**: **$+30.0$** (Northern corridor beyond the first city).
+- **Viridian Forest `(1, 0)` & Diglett's Cave `(1, 22)`**: **$+30.0$** (Complex multi-trainer labyrinth).
+- **Mt. Moon `(1, 1..3)` & Route 3/4**: **$+40.0$** (Mountain barrier passage).
+- **Viridian City `(3, 1)`**: **$+50.0$** (First major hub city; $2.5\times$ Route 1, providing a smooth $+20.2$ discounted pull from the start of Route 1).
+- **Pewter City `(3, 2)`**: **$+100.0$** (First Gym city; culmination of Route 1 + Route 2 + Forest).
+- **Pewter Gym Arena `(6, 2)`**: **$+25.0$** (Entering the arena to challenge Brock).
+- **Subsequent Major Cities**: Scaled progressively: Cerulean City ($+120.0$), Vermilion City ($+150.0$), Lavender Town ($+150.0$), Celadon City ($+180.0$), Fuchsia City ($+200.0$), Saffron City ($+220.0$), Cinnabar Island ($+250.0$), Indigo Plateau ($+300.0$).
+
+#### C. Calibrated Gym Leader Defeat Badges ($+250.0$ to $+600.0$)
+Defeating Gym Leaders is scaled to reflect authentic chapter completion without exploding the Bellman distribution. Read directly from `SaveBlock1` flags byte `0xEE0 + 260`:
+- **Boulder Badge (Brock - Pewter Gym)**: **$+250.0$** ($2.5\times$ reaching Pewter City; $12.5\times$ a wild battle knockout).
+- **Cascade Badge (Misty - Cerulean Gym)**: **$+300.0$**
+- **Thunder Badge (Lt. Surge - Vermilion Gym)**: **$+350.0$**
+- **Rainbow Badge (Erika - Celadon Gym)**: **$+400.0$**
+- **Soul Badge (Koga - Fuchsia Gym)**: **$+450.0$**
+- **Marsh Badge (Sabrina - Saffron Gym)**: **$+500.0$**
+- **Volcano Badge (Blaine - Cinnabar Gym)**: **$+550.0$**
+- **Earth Badge (Giovanni - Viridian Gym)**: **$+600.0$**
+
+---
+
+### 3. Anti-Farming & Invariant Guards
+
+1. **Explicit Milestone Registry**:
+   - Only geographic locations explicitly registered in `MILESTONE_MAP_REWARDS` award points. Unlisted coordinates default strictly to $0.0$.
+2. **Episode-Scoped Uniqueness**:
+   - `visited_maps = set()` tracks all discovered coordinates within the active episode.
+   - Initial spawn location `(4, 0)` is registered on `initialize()`.
+   - Oscillating across borders (e.g. Pallet Town $\longleftrightarrow$ Route 1 or Route 1 $\longleftrightarrow$ Viridian City) yields reward once and strictly $+0.0$ thereafter.
+3. **Badge Bit Transition Guard**:
+   - `awarded_badges = set()` pre-populates with any pre-existing badges in RAM on `initialize()`, ensuring that only genuine $0 \to 1$ bit transitions award badge bonuses.
+4. **Automated Assertion Suite**:
+   - Executed [`scratch/test_milestone_rewards.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scratch/test_milestone_rewards.py): Verified all 11 unit test assertions covering initial spawn (0), bedroom rejection (0), Oak's lab rejection (0), Pallet overworld (+10), anti-farming oscillation (0), Route 1 (+20), Viridian City (+50), Route 2 (+30), Viridian Forest (+30), Pewter City (+100), Pewter Gym (+25), Brock defeat (+250), and Misty defeat (+300).
+
+---
+
+### 4. Verified Master Artifacts
+
+* **Updated Reward Engine**: [`src/pokefirered/rewards.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/rewards.py).
+* **Updated Environment Wrapper**: [`src/pokefirered/wrappers.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/wrappers.py).
+* **Project Rule Invariant File**: [`AGENTS.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/AGENTS.md) (Section 8 updated).
+* **Unit Test Suite**: [`scratch/test_milestone_rewards.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scratch/test_milestone_rewards.py).

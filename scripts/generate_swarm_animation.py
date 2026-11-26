@@ -257,29 +257,19 @@ def main():
     trajectories = generate_multi_gen_trajectories(num_gens=5, agents_per_gen=8, max_steps=300)
 
     renderer = SwarmRenderer(viewport_w=760, viewport_h=480)
-    print("Rendering animated timelapse video and showcase GIF with GBA Red & Leaf avatars...")
+    print("Rendering compressed MP4 timelapse video (60 FPS / 4x speed, 0 holds) with GBA Red & Leaf avatars...")
     renderer.generate_timelapse(
         trajectories_by_gen=trajectories,
         output_video_path=video_path,
-        output_gif_path=gif_path,
-        fps=15,
+        fps=60,
         trail_length=14,
-        gif_duration_ms=125,
-        gif_frame_skip=2,
-        intro_hold_frames=15,
-        outro_hold_frames=30
+        intro_hold_frames=0,
+        outro_hold_frames=0
     )
-
-    # Also update media/kanto_swarm_showcase.gif
-    import shutil
-    media_gif = PROJECT_ROOT / "media" / "kanto_swarm_showcase.gif"
-    shutil.copyfile(gif_path, media_gif)
-    print(f"Updated media showcase GIF: {media_gif}")
 
     print("\n" + "=" * 75)
     print(" GBA FIRERED VISUALIZATION EXPORT COMPLETE!")
     print(f" Video Path : {video_path}")
-    print(f" GIF Path   : {gif_path}")
     print("=" * 75)
 
 if __name__ == "__main__":

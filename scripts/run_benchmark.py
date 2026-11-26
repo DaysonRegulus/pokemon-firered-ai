@@ -50,7 +50,18 @@ def compute_dynamic_timesteps(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Continuous DQN vs PPO Benchmark with RND & Dynamic Curriculum")
-    parser.add_argument("--generations", type=int, default=5, help="Total number of alternating generations (default: 5)")
+    parser.add_argument(
+        "--generations", "-g",
+        type=int,
+        default=5,
+        help="Number of additional generations to run relative to current state (default: 5)"
+    )
+    parser.add_argument(
+        "--target-generation", "--target-gen", "--until-generation",
+        type=int,
+        default=None,
+        help="Absolute target generation milestone to run until (overrides relative --generations)"
+    )
     parser.add_argument("--num-envs", type=int, default=8, help="Number of parallel environments (default: 8)")
     parser.add_argument("--min-timesteps", type=int, default=4096, help="Base minimum timesteps for Gen 1 (default: 4096)")
     parser.add_argument("--growth-rate", type=float, default=0.05, help="Dynamic curriculum growth rate (default: 0.05)")
@@ -99,9 +110,8 @@ def render_generation_swarm(
     visual_dir: Path,
     gen: int,
     num_envs: int = 8,
-    steps_render: int = 240
 ) -> Optional[Path]:
-    """Renders side-by-side comparison of QR-DQN vs PPO for generation gen."""
+    """Renders side-by-side comparison of QR-DQN vs PPO for generation gen at 60 FPS (4x real-time game speed)."""
     try:
         from pokefirered.visualization import SwarmRenderer
     except ImportError:
@@ -139,22 +149,10 @@ def render_generation_swarm(
             ppo_metrics["tiles"] = d.get("unique_tiles", 0)
             ppo_metrics["sps"] = d.get("sps", 0.0)
 
-    def subsample(trajs, max_len):
-        sampled_list = []
-        for t in trajs:
-            if len(t) > max_len:
-                stride = len(t) / max_len
-                sampled_list.append([t[int(i * stride)] for i in range(max_len)])
-            else:
-                sampled_list.append(t)
-        return sampled_list
-
-    sampled_dqn = subsample(dqn_trajs, steps_render)
-    sampled_ppo = subsample(ppo_trajs, steps_render)
-
+    # Full un-truncated trajectories: every step recorded till the final step
     trajectories_by_condition = {
-        "QRDQN_RND": sampled_dqn,
-        "PPO_RND": sampled_ppo,
+        "QRDQN_RND": dqn_trajs,
+        "PPO_RND": ppo_trajs,
     }
 
     palette = {
@@ -174,22 +172,18 @@ def render_generation_swarm(
 
     renderer = SwarmRenderer(viewport_w=760, viewport_h=480)
     video_path = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.mp4"
-    gif_path = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.gif"
 
     renderer.generate_timelapse(
         trajectories_by_gen=trajectories_by_condition,
         output_video_path=video_path,
-        output_gif_path=gif_path,
-        fps=15,
+        fps=60,  # 60 FPS = 4x real-time GBA game speed (with 4-frame skip)
         trail_length=14,
-        gif_duration_ms=125,
-        gif_frame_skip=2,
         custom_palette=palette,
         custom_title=f"POKEMON FIRERED: GENERATION {gen} SWARM (QR-DQN vs PPO)",
         custom_legend=legend,
         group_tiles=group_tiles,
     )
-    print(f"[SWARM] Generated Gen {gen} visual evidence: {video_path} and {gif_path}")
+    print(f"[SWARM] Generated Gen {gen} video: {video_path}")
     return video_path
 
 
@@ -202,7 +196,7 @@ def stitch_generation_videos(video_paths: List[Path], output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cap0 = cv2.VideoCapture(str(valid_videos[0]))
-    fps = cap0.get(cv2.CAP_PROP_FPS) or 15.0
+    fps = cap0.get(cv2.CAP_PROP_FPS) or 60.0
     w = int(cap0.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap0.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap0.release()
@@ -278,19 +272,31 @@ def main():
         state_file.unlink()
 
     state = load_state(state_file)
+    last_gen = state["last_completed_generation"]
+
+    if args.target_generation is not None:
+        target_generation = args.target_generation
+        if target_generation <= last_gen:
+            print(f"[BENCHMARK] Target generation {target_generation} already completed (current state: Gen {last_gen}). Nothing to run.")
+            return
+        run_mode_desc = f"Absolute milestone until Gen {target_generation}"
+    else:
+        target_generation = last_gen + args.generations
+        run_mode_desc = f"Relative increment +{args.generations} generations (until Gen {target_generation})"
 
     python_exe = sys.executable
 
     print("\n" + "=" * 80)
     print(" [BENCHMARK] PPO vs QR-DQN (+ PER) CONTINUOUS RND & DYNAMIC CURRICULUM")
-    print(f" Target Generations : {args.generations}")
+    print(f" Execution Mode     : {run_mode_desc}")
+    print(f" Target Generation  : {target_generation}")
     print(f" Parallel Envs      : {args.num_envs}")
     print(f" Base Minimum Steps : {args.min_timesteps:,} (Gen 1 starting budget)")
     print(f" Growth Rate        : {args.growth_rate * 100:.1f}% of model lifetime")
     print(f" Step Quantization  : {args.quantize:,}")
     print(f" Checkpoint Dir     : {checkpoint_dir}")
     print(f" Visual Evidence    : {visual_dir}")
-    print(f" Current State      : Last completed Gen {state['last_completed_generation']}")
+    print(f" Current State      : Last completed Gen {last_gen}")
     print(f" QR-DQN Lifetime    : {state['qrdqn_lifetime_steps']:,} steps")
     print(f" PPO Lifetime       : {state['ppo_lifetime_steps']:,} steps")
     print("=" * 80 + "\n")
@@ -303,8 +309,8 @@ def main():
         all_gen_videos = [visual_dir / f"benchmark_rnd_curriculum_gen{g:03d}.mp4" for g in range(1, state["last_completed_generation"] + 1)]
         stitch_generation_videos(all_gen_videos, stitched_video)
 
-    for gen in range(1, args.generations + 1):
-        print(f"\n==================== [GENERATION {gen} / {args.generations}] ====================")
+    for gen in range(1, target_generation + 1):
+        print(f"\n==================== [GENERATION {gen} / {target_generation}] ====================")
 
         # -------------------------------------------------------------
         # Phase 1: QR-DQN Execution for Generation `gen`
@@ -419,26 +425,29 @@ def main():
                 sys.exit(1)
 
         # -------------------------------------------------------------
-        # Phase 3: Visual Swarm Rendering & Timeline Stitching
+        # Phase 3: Visual Swarm Video Rendering & Timeline Stitching
         # -------------------------------------------------------------
         if not args.no_render:
             gen_mp4 = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.mp4"
-            gen_gif = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.gif"
 
             is_new_render = False
-            if gen_mp4.exists() and gen_gif.exists():
-                print(f"[SWARM] Gen {gen} visual evidence already exists, skipping re-render.")
+            if gen_mp4.exists():
+                print(f"[SWARM] Gen {gen} video evidence already exists, skipping re-render.")
                 gen_video = gen_mp4
             else:
-                print(f"\n>>> [GEN {gen}] RENDERING SWARM VISUALIZATIONS (QR-DQN vs PPO)...")
+                print(f"\n>>> [GEN {gen}] RENDERING SWARM VIDEO (QR-DQN vs PPO)...")
                 gen_video = render_generation_swarm(checkpoint_dir, visual_dir, gen, num_envs=args.num_envs)
                 is_new_render = True
 
             if is_new_render and gen_video and gen_video.exists():
                 rendered_videos.append(gen_video)
-                stitched_video = visual_dir / "stitched_chronological_benchmark.mp4"
-                all_gen_videos = [visual_dir / f"benchmark_rnd_curriculum_gen{g:03d}.mp4" for g in range(1, gen + 1)]
-                stitch_generation_videos(all_gen_videos, stitched_video)
+
+    # Master timeline compilation at benchmark milestone conclusion
+    if not args.no_render and (rendered_videos or not (visual_dir / "stitched_chronological_benchmark.mp4").exists()):
+        print("\n>>> COMPILING MASTER CHRONOLOGICAL BENCHMARK TIMELINE...")
+        stitched_video = visual_dir / "stitched_chronological_benchmark.mp4"
+        all_gen_videos = [visual_dir / f"benchmark_rnd_curriculum_gen{g:03d}.mp4" for g in range(1, state["last_completed_generation"] + 1)]
+        stitch_generation_videos(all_gen_videos, stitched_video)
 
     print("\n" + "=" * 80)
     print(" [BENCHMARK COMPLETE] ALL GENERATIONS SUCCESSFULLY EXECUTED!")

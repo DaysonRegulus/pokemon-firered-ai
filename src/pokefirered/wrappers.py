@@ -112,6 +112,8 @@ class CustomRewardEnv(gym.Wrapper):
         else:
             info['ssim_bank_size'] = 0
         info['episode_faints'] = self.episode_faints
+        info['discovered_areas_count'] = len(self.reward_manager.visited_maps)
+        info['badges_count'] = len(self.reward_manager.awarded_badges)
 
         # Extract Ground-Truth Player Coordinates from RAM for exploration tracking
         ram = self.base_env.unwrapped.get_ram()

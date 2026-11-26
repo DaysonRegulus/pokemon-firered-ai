@@ -237,32 +237,23 @@ def main():
     print("\n" + "=" * 80)
     print(f" RENDERING 4-WAY COMPARATIVE SWARM ANIMATION ({algo})")
     print(f" Video Output: {video_path}")
-    print(f" GIF Output:   {gif_path}")
     print(" Viewport:     760x480 (Widescreen)")
-    print(" Pacing:       125ms per frame (~8 fps) with intro/outro holds")
+    print(" Pacing:       60 FPS (4x real-time game speed, 0 intro/outro hold frames)")
     print("=" * 80)
 
     renderer = SwarmRenderer(viewport_w=760, viewport_h=480)
     renderer.generate_timelapse(
         trajectories_by_gen=trajectories_by_mode,
         output_video_path=video_path,
-        output_gif_path=gif_path,
-        fps=15,
+        fps=60,
         trail_length=14,
-        gif_duration_ms=125,
-        gif_frame_skip=2,
-        intro_hold_frames=15,
-        outro_hold_frames=30,
+        intro_hold_frames=0,
+        outro_hold_frames=0,
         custom_palette=BENCHMARK_PALETTE,
         custom_title=title_prefix,
         custom_legend=custom_legend,
         group_tiles=group_tiles
     )
-
-    # Also update media/kanto_swarm_showcase.gif
-    import shutil
-    shutil.copyfile(gif_path, showcase_gif)
-    print(f"[OK] Updated primary showcase GIF: {showcase_gif}")
 
     # Save keyframe inspections
     import cv2
