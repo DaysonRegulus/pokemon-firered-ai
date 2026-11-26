@@ -59,11 +59,14 @@ This document establishes the ground-truth technical invariants and architectura
    - **PPO Policy Entropy**:
      - `--ent-coef`: Set to **`0.08`** (preventing policy collapse into local attractor loops).
 3. **Dynamic Curriculum Scaling Formula**:
-   - Generation horizon scales dynamically with agent lifetime:
-     $$T_g = \max\left(2048, \text{round}\left(\frac{4096 + 0.05 \times \text{lifetime}}{2048}\right) \times 2048\right)$$
-4. **Empirical Hardware Throughput Baselines (CUDA)**:
-   - Steady-state rollout throughput on CUDA: **$260\text{--}295$ SPS** for QR-DQN vs **$114\text{--}120$ SPS** for PPO.
-   - *Note*: Initial short generations (< 10k steps) have lower average SPS (~160 QR-DQN / ~72 PPO) due to fixed Python interpreter and GBA environment initialization overhead.
+   - Generation horizon scales dynamically with agent lifetime (2.5% default growth rate; historical Gens 1–90 used 5.0%):
+     $$T_g = \max\left(2048, \text{round}\left(\frac{4096 + 0.025 \times \text{lifetime}}{2048}\right) \times 2048\right)$$
+4. **Empirical Hardware Throughput Baselines, Worker Isolation & Buffer Invariants (CUDA)**:
+   - Steady-state throughput on CUDA (`n_stack=4`, optimized pipeline): **~$400$ SPS** for PPO vs **~$193$ SPS** for QR-DQN (+ PER with live GPU RND re-evaluation). *(Historical `n_stack=2` pre-optimization baselines were $114\text{--}120$ SPS PPO / $260\text{--}295$ SPS QR-DQN.)*
+   - **Per-Step Zero-Blocking Invariant**: Synchronous external GPU probes (`GPUtil.getGPUs()` / `nvidia-smi.exe`, `~52 ms/call`) must **never** execute inside per-step RL callbacks.
+   - **Wrapper Ordering Invariant**: `StochasticFrameSkip(n=4)` wraps `base_env` *before* `WarpFrame` and `CustomRewardEnv(reward_frame_skip=1)` so image resizing and `get_ram()` execute once per agent step instead of 4x.
+   - **Subprocess Worker Isolation Invariant (Windows Commit Limit)**: Emulator worker processes spawned via `SubprocVecEnv` (`make_single_env` / `wrappers.py` / `env_factory.py` and `__mp_main__` scripts) must **never** import `torch` or `stable_baselines3` at module top level (avoiding `>1 GB/worker` of redundant CUDA DLL virtual commit and `OSError [WinError 1455]` pagefile deadlocks). Use pure OpenCV/Gymnasium `wrappers.WarpFrame` in workers and lazy-import `stable_baselines3` / `torch` in the main process.
+   - **PER Replay Buffer Memory Bound (`n_stack=4`)**: `PrioritizedReplayBuffer` stores explicit `(N, 4, 84, 84)` `uint8` arrays for both `states` and `next_states` (`56.4 KB/step`, `~2.82 GB` RAM and `~483.6 MB` compressed `.npz` at `N=50,000`); keep capacity $\le 50,000$ on 16 GB hosts unless refactored to frame-deduplicated circular storage (`8x` reduction).
 
 ---
 
@@ -123,5 +126,7 @@ This document establishes the ground-truth technical invariants and architectura
    - **Gym Arenas**: **+25.0** (Pewter Gym Arena `(6, 2)`).
 3. **Gym Leader Defeat Badges**:
    - Defeating Gym Leaders awards calibrated bonuses: **+250.0** (Boulder Badge / Brock), scaling up to **+600.0** (Earth Badge / Giovanni), awarded upon acquisition in `SaveBlock1` flags byte `0xEE0 + 260`.
-4. **Anti-Farming / Episode Invariant**:
+4. **Anti-Farming, Party-Order & Overworld Integrity Invariants**:
    - Every geographic milestone and gym badge reward is awarded **strictly once per episode** upon initial trigger to prevent boundary oscillation or cyclic reward exploitation.
+   - Level gains, catches, and own-party faint penalties are evaluated over **aggregate valid party totals** (`u8` level at `+0x54`, `curr_party_count`, `sum(valid_lvls)`, `curr_fainted_count`) rather than per-slot deltas to prevent `[slot 0] <-> [slot 1]` party-swap farming.
+   - Gym badge reads from `SaveBlock1` (`0xEE0 + 260`) are gated by `OVERWORLD_CB2 == 0x080565C9`, valid EWRAM pointer bounds, and `FLAG_SYS_POKEMON_GET` sanity checks.

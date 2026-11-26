@@ -173,7 +173,7 @@ The following internal chronological event ledger synthesizes the complete histo
 - **Tiles Explored**: Explored tiles scaled from $114$ (Gen 20) to $241$ (Gen 35), consistently recording visits across 3 to 4 distinct maps per generation.
 
 ### Phase III: The Northern Grass Frontier Breakthrough (Generations 36–55 | 350k to 1.1M Steps)
-- **The Route 1 Discovery**: In Generation 48 ($38,912$ steps), PPO broke through the northern tree fence perimeter of Pallet Town and entered Map `(3, 19)`: Route 1.
+- **Sustained Multi-Map Route 1 Breakthrough (Gen 48)**: After an initial exploratory foray into Route 1 as early as **Generation 13** (`67,818` cumulative steps, Env `1`, `(12, 39)`, verified via full 180-file trajectory audit; `Gen 13` touched only 3 maps total), Generation 48 ($38,912$ steps in rollout) marked PPO's transition into sustained multi-room plus Route 1 campaigns.
 - **Survival & Combat Initiation**: For the first time, Bulbasaur encountered wild Rattata and Pidgey (Level 2–4). In early Route 1 incursions, PPO frequently mashed `B` or directional keys during battle, taking damage and occasionally fainting (-5 penalty).
 - **The 504-Tile Milestone**: In Generation 53 ($51,200$ steps), PPO achieved a benchmark record of **$504$ unique tiles across 6 distinct maps**, navigating deep into the central dirt path of Route 1.
 
@@ -210,7 +210,7 @@ The following internal chronological event ledger synthesizes the complete histo
 ### Phase III: The Epsilon-Transition Plateau (Generations 36–55 | 350k to 1.1M Steps)
 - **The Variance Pathology**: Between Generations 45 and 60, QR-DQN hit an exploration plateau, hovering between $300$ and $400$ tiles per generation.
 - **Root Cause**: As the dynamic horizon grew, QR-DQN's greedy argmax policy frequently selected long straight-line runs into walls or fences. Because $\epsilon$-greedy action selection injects independent uniform noise ($20\%$ of actions), it frequently disrupted multi-step navigational sequences required to bypass Route 1's one-way jumpable ledges.
-- **Peak Discovery**: In Generation 49 ($40,960$ steps), QR-DQN broke into Route 1, charting **$438$ unique tiles** across 5 maps.
+- **Sustained Multi-Map Route 1 Breakthrough (Gen 49)**: Following an initial brief Route 1 entry in **Generation 16** (`92,356` cumulative steps, Env `3`, `(13, 39)`, verified via full trajectory audit), Generation 49 ($40,960$ steps in rollout) marked QR-DQN's sustained 5-map + Route 1 frontier push, charting **$438$ unique tiles** across 5 maps.
 
 ### Phase IV: Deep Overland Incursions & Combat Fragility (Generations 56–89 | 1.1M to 6.0M Steps)
 - **Extreme Intrinsic Motivation**: As the dynamic curriculum reached $150\text{k}\text{--}290\text{k}$ steps per generation, QR-DQN generated massive intrinsic curiosity returns ($R_{\text{int}}$ frequently exceeded $1,500\text{--}2,800$, peaking at **$2,855.96$ in Gen 89**).
@@ -587,4 +587,7 @@ Extrapolations are calculated using empirical progress curves from Generations 1
   $$r_{\text{int}}(s) = \frac{\|\hat{f}(s; \theta_p) - f(s; \theta_t)\|_2^2 - \mu_{\text{running}}}{\sigma_{\text{running}} + 10^{-8}}$$
 
 ---
+---
+*Addendum (2026-11-26 PM)*: Benchmark v2 subsequently completed **Generation 90** (`6,334,464` symmetrical steps per model) and was archived in [`checkpoints/archive/benchmark_rnd_curriculum_v2/`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/archive/benchmark_rnd_curriculum_v2/ARCHIVE_MANIFEST.json). A Gen 90 forensic audit resolved `rewards.py` party-swap/phantom-badge edge cases, eliminated the `GPUtil` `52.31 ms/step` blocking bottleneck (`3.5x` PPO speedup to `~400 SPS`), isolated Windows `SubprocVecEnv` workers from `torch` (`WinError 1455`), and launched the recalibrated `benchmark_milestone_rnd` (v3) run (`Gens 1–42` complete, `288,768` steps/model). See Phases 27–28 of [`RESEARCH_CHRONICLE.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/RESEARCH_CHRONICLE.md) for full details and first-entry Route 1 A/B metrics.
+
 *End of Comprehensive Training Post-Mortem. Master Report compiled and verified by Antigravity RL Research Swarm.*

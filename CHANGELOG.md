@@ -16,7 +16,47 @@ This repository follows a **custom commit-by-commit historical versioning conven
    > *Milestone Reconciliation Note*: Candidates for the Linux milestone included `e682e97` (first root README describing WSL Ubuntu execution), `95f08be` (reproducible build instructions in `setup.txt`), and `a458cc3` (the final terminal commit of the `legacy-linux` branch). Commit `95f08be` was designated `1.0.0` because it completed the end-to-end environment pipeline required to build `stable-retro` from source and run the training scripts reliably.
 4. **Linux Maintenance & Pre-Migration (`1.0.1` – `1.0.11`)**: Media optimization, screenshot additions, asset normalization, legacy branch finalization, and initial Windows workspace isolation.
 5. **Version 2.0.0 (`2.0.0`)**: The milestone at which the Windows-native version was created (`402c201`, 2026-10-14), introducing pre-compiled Windows `stable-retro` integration, GPU-accelerated PPO, Random Network Distillation (RND) curiosity, RAM reward managers, and the modular `src/pokefirered/` package architecture.
-6. **Subsequent Commits (`2.0.1` – `2.0.23`)**: Monotonically incremented patch revisions tracking rapid architectural advances: process isolation, GPU SSIM curiosity, DMA RAM coordinate invariance, count-based exploration, distributional QR-DQN with Prioritized Experience Replay, 12-environment benchmark suites, animated Kanto swarm visualizers, 1:1 continuous world manifold topology, and the **PokéRL Studio** desktop suite.
+6. **Subsequent Commits (`2.0.1` – `2.0.25`)**: Monotonically incremented patch revisions tracking rapid architectural advances: process isolation, GPU SSIM curiosity, DMA RAM coordinate invariance, count-based exploration, distributional QR-DQN with Prioritized Experience Replay, 12-environment benchmark suites, animated Kanto swarm visualizers, 1:1 continuous world manifold topology, the **PokéRL Studio** desktop suite, 60 FPS video synthesis, calibrated milestone rewards, `3.5x` PPO pipeline optimization, and Windows `SubprocVecEnv` worker isolation.
+
+---
+
+## [2.0.25] - 2026-11-26 (Phase 27–28 Optimization & `benchmark_milestone_rnd`)
+
+### Added
+- **PPO `3.5x` Throughput Optimization & Wrapper Reordering**:
+  - `src/pokefirered/callbacks.py`: Throttled synchronous `GPUtil.getGPUs()` (`~52.3 ms/step`) to `10.0s` intervals, replaced deque mean scans with $\mathcal{O}(1)$ running sums in `RAMExplorationTrackerCallback`, and sliced `obs[:, -1:, :, :]` before `float32` conversion in `RNDCallback`.
+  - `src/pokefirered/env_factory.py`: Placed `StochasticFrameSkip(n=4)` before `WarpFrame` and `CustomRewardEnv(reward_frame_skip=1)` to cut image resizing and `get_ram()` overhead by `4x`; added `--states` stepping-stone pool distribution.
+  - `src/pokefirered/rnd.py` & `src/pokefirered/models/qrdqn.py`: Cached CUDA RND normalization tensors under `torch.inference_mode()` and upgraded QR-DQN PER updates to evaluate non-stale RND rewards live on sampled `next_states`.
+- **Training Continuity & `2.5%` Dynamic Curriculum**:
+  - `scripts/train.py` & `scripts/run_benchmark.py`: Defaulted to `--n-stack 4`, `--buffer-size 50000`, and `--growth-rate 0.025`; added `--states`, `--warm-start-from`, `--reset-value-head`, `--reset-rnd`, and `--render-every`.
+- **v2 Archival & `benchmark_milestone_rnd` (v3) Validation**:
+  - Completed v2 cleanly at Gen 90 (`6,334,464` symmetrical steps/model) and archived checkpoints (`10.352 GB`), visuals (`18.077 GB`), and logs into `*/archive/benchmark_rnd_curriculum_v2/` (`ARCHIVE_MANIFEST.json`).
+  - Executed fresh 42-generation v3 benchmark (`288,768` steps/model, PPO `373.8` eff. SPS vs QR-DQN `166.1` eff. SPS) and verified `3.33x` Pallet Town occupancy / `3.52x` Route 1 traversal / `5.50x` unique Route 1 tiles vs v2 at `288,768` steps.
+
+### Fixed
+- **Windows `WinError 1455` Pagefile Deadlock (`SubprocVecEnv` Worker Isolation)**:
+  - `src/pokefirered/wrappers.py`: Added pure OpenCV/Gymnasium `WarpFrame` replacing top-level `stable_baselines3.common.atari_wrappers.WarpFrame`.
+  - `src/pokefirered/env_factory.py`, `scripts/train.py`, `scripts/run_benchmark.py`: Moved `torch`, `PPO`, `VecEnv`, and curiosity/model imports out of module top-level so Windows `SubprocVecEnv` workers run with `torch=False, sb3=False` (saving `>8 GB` virtual commit across 8 workers); defaulted `--device auto`.
+- **Reward Integrity & Safety Hardening**:
+  - `src/pokefirered/rewards.py`: Switched party/opponent level reads to `u8` (`+0x54`), replaced per-slot deltas with party-order-invariant aggregate totals, and added `_is_valid_overworld_sb1()` (`OVERWORLD_CB2 == 0x080565C9`, EWRAM bounds, `FLAG_SYS_POKEMON_GET`) to block phantom badge triggers.
+- **Documentation & Forensic Route 1 Corrections**:
+  - Updated `AGENTS.md` (Sections 4 & 8), appended Phases 27–28 in `RESEARCH_CHRONICLE.md`, corrected Gen 13 / Gen 16 initial Route 1 attribution in `FIRERED_TRAINING_POSTMORTEM.md`, and synchronized `README.md`.
+
+---
+
+## [2.0.24] - 2026-11-26 (`c71e407` — Phases 23–26 & 60 FPS Migration)
+
+### Added
+- **Mathematically Calibrated Milestone Reward System (`src/pokefirered/rewards.py`, `AGENTS.md`)**:
+  - Zero-reward policy (`0.0`) for trivial domestic interiors (Hero Bedroom 2F, Oak's Lab, Rival House, Gatehouses) paired with balanced one-time-per-episode macro milestones (`+10.0` Pallet Town Overworld, `+20.0` Route 1/22, `+50.0` Viridian City, `+100.0` Pewter City, `+250.0`–`+600.0` Gym Badges).
+- **60 FPS / 4x Real-Time Video Synthesis Standard**:
+  - `scripts/update_videos_to_60fps.py`, `src/pokefirered/visualization/swarm_renderer.py`, `scripts/run_benchmark.py`, and swarm CLI scripts upgraded to MP4-only export at `60 FPS` (`4x` emulation speed) with zero intro/outro hold frames (GIF export deprecated).
+- **Comprehensive 6M+ Step Post-Mortem (`FIRERED_TRAINING_POSTMORTEM.md`)**:
+  - Full empirical telemetry post-mortem covering Gens 1–89 of Benchmark v2 alongside publication charts in `assets/postmortem_charts/`.
+
+### Fixed
+- **GBA `uint8` Wrap-Around Arithmetic Underflow (`src/pokefirered/rewards.py`)**:
+  - Prevented unsigned byte underflow corruption on battle HP/level RAM comparisons across Deep Frontier exploration (Phase 24).
 
 ---
 

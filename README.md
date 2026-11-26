@@ -28,9 +28,8 @@ This repository serves as an empirical research platform comparing intrinsic cur
 2. **Perceptual Visual Metric (SSIM - Structural Similarity)**:
    - GPU-accelerated structural similarity evaluation across sliding temporal frame buffers.
    - Computes spatial luminance, contrast, and structural variance to reward visual transitions.
-3. **Ground-Truth Spatial Frequency (COORD - Memory Coordinate Novelty)**:
-   - Real-time tracking of map coordinates `(map_id, x, y)` extracted directly from DMA-invariant GBA overworld RAM structures.
-   - Computes non-parametric curiosity decay via $r_{\text{coord}} = \beta \cdot \frac{1}{\sqrt{N(m, x, y)}}$.
+3. **Ground-Truth Spatial Frequency (COORD - Memory Coordinate Novelty)** *(Deprecated — Phases 12 & 24)*:
+   - Real-time tracking of map coordinates `(map_id, x, y)` via $1/\sqrt{N(m, x, y)}$. Permanently deprecated in active benchmarks due to the "Roomba Fallacy" (exhaustive room mowing); **RND** + calibrated macro milestones (`src/pokefirered/rewards.py`) are used instead.
 4. **Hybrid Ensembles**:
    - Arbitrary runtime composition: `RND+COORD`, `SSIM+COORD`, `RND+SSIM`, `RND+SSIM+COORD`.
 
@@ -230,24 +229,26 @@ python scripts/train.py --algo PPO --num-envs 8 --exploration NONE
 
 **Common Training Flags:**
 - `--algo <PPO|QRDQN>`: Choose between on-policy PPO and off-policy QR-DQN.
-- `--num-envs <N>`: Parallel vectorized emulator instances (recommended: 8 or 12).
-- `--exploration <MODE>`: `RND`, `SSIM`, `COORD`, `RND+COORD`, `SSIM+COORD`, `RND+SSIM`, `RND+SSIM+COORD`, or `NONE`.
+- `--num-envs <N>`: Parallel vectorized emulator instances (default: `8`).
+- `--n-stack <N>`: Frame stack depth per observation (default: `4`).
+- `--buffer-size <N>`: QR-DQN PER capacity (default: `50000` for `<= 16 GB` hosts under `n_stack=4`).
+- `--growth-rate <F>`: Dynamic curriculum growth rate (default: `0.025`).
+- `--exploration <MODE>`: `RND`, `SSIM`, `NONE`, or legacy/hybrid variants.
 - `--fresh`: Reset model weights and train from scratch.
-- `--visual-eval`: Periodically execute evaluation episodes and save animated GIFs to `eval_recordings/`.
-- `--device <auto|cuda|cpu>`: Hardware device selection (defaults to auto-detected CUDA).
+- `--visual-eval`: Periodically execute evaluation episodes.
+- `--device <auto|cuda|cpu>`: Hardware device selection (defaults to `auto`, resolved inside main process).
 
 ---
 
 ### 6. Multi-Agent Swarm Visualization
 
-Render Peter Whidden-style swarm videos compositing authentic GBA Red/Leaf walking sprites onto the continuous Kanto overworld map:
+Render Peter Whidden-style swarm videos compositing authentic GBA Red/Leaf walking sprites onto the continuous Kanto overworld map (MP4-only `60 FPS` / `4x` speed standard):
 
 ```powershell
-python scripts/generate_swarm_animation.py \
-  --trajectories checkpoints/Pokemon_PPO_RND_8env_trajectories.json \
-  --output-video visual_evidence/swarm_renders/swarm_run.mp4 \
-  --output-gif visual_evidence/swarm_renders/swarm_run.gif \
-  --fps 30
+python scripts/generate_swarm_animation.py `
+  --trajectories checkpoints/Pokemon_PPO_RND_8env_trajectories.json `
+  --output-video visual_evidence/swarm_renders/swarm_run.mp4 `
+  --fps 60
 ```
 
 ---
@@ -309,8 +310,10 @@ A comprehensive, commit-by-commit historical changelog reconstructed from the re
   Initial functional release establishing reproducible environment setup on Linux/WSL2 (`setup.txt`), training runner (`FireRedRender.py`), RAM reward manager, and verified gameplay demonstration (`demo1.gif`).
 - **`v2.0.0` — Windows Platform Creation** (`2026-10-14`):
   Ground-up transition to Windows-native execution, featuring precompiled `stable-retro` integration, GPU-accelerated PPO, Random Network Distillation (RND) curiosity, and the modular `src/pokefirered/` package architecture.
-- **`v2.0.23` — PokéRL Studio & Unified World Topology (Current)** (`2026-10-21`):
+- **`v2.0.23` — PokéRL Studio & Unified World Topology** (`2026-10-21`):
   Integrated **PokéRL Studio** desktop mission-control suite (PySide6) with 6 dedicated views, 60 FPS emulator integration, live Matplotlib curves, standalone binary packaging (`PokeRL_Studio.exe`), and the continuous `WorldTopology` manifold engine with mathematically verified zero-drift overworld transitions.
+- **`v2.0.24–2.0.25` — 6.33M-Step Post-Mortem, 3.5× PPO Optimization & Milestone Validation** (`2026-11-26`):
+  Archived the 90-generation v2 benchmark (`6,334,464` steps/model; see [FIRERED_TRAINING_POSTMORTEM.md](FIRERED_TRAINING_POSTMORTEM.md)), migrated swarms to 60 FPS MP4-only export, eliminated `GPUtil` blocking (`400 SPS` PPO), isolated Windows `SubprocVecEnv` workers from `torch` (`WinError 1455` fix), hardened `SaveBlock1` & party-order reward guards (`AGENTS.md`), and validated `benchmark_milestone_rnd` across 42 symmetrical generations (`3.52×` Route 1 traversal improvement for PPO).
 
 > [!NOTE]
 > For the complete entry-by-entry historical ledger documenting all 43 commits, research milestones, and technical change categories, see [CHANGELOG.md](CHANGELOG.md).

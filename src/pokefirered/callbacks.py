@@ -12,55 +12,59 @@ from stable_baselines3.common.callbacks import BaseCallback
 class ComprehensiveLoggingCallback(BaseCallback):
     """
     Logs hardware metrics (RAM, GPU), FPS / SPS, cumulative faints, and action distribution.
+    Throttles expensive hardware probes (especially GPUtil/nvidia-smi) to avoid stalling rollouts.
     """
-    def __init__(self, verbose=0):
+    def __init__(self, verbose=0, hw_poll_interval=10.0, log_interval_steps=64):
         super().__init__(verbose)
         self.last_time = time.time()
+        self.last_hw_time = 0.0
+        self.hw_poll_interval = hw_poll_interval
+        self.log_interval_steps = log_interval_steps
         self.last_step_count = 0
+        self.cached_ram_usage = 0.0
+        self.cached_gpu_load = 0.0
+        self.cached_gpu_mem = 0.0
         self.action_counts = np.zeros(6, dtype=int)
         self.button_names = ["B", "UP", "DOWN", "LEFT", "RIGHT", "A"]
 
     def _on_step(self) -> bool:
-        # 1. Hardware Metrics
-        ram_usage = psutil.virtual_memory().percent
-        try:
-            gpus = GPUtil.getGPUs()
-            if gpus:
-                gpu_load = gpus[0].load * 100
-                gpu_mem = gpus[0].memoryUsed
-            else:
-                gpu_load = 0
-                gpu_mem = 0
-        except Exception:
-            gpu_load = 0
-            gpu_mem = 0
-
-        self.logger.record("hardware/ram_usage", ram_usage)
-        self.logger.record("hardware/gpu_load", gpu_load)
-        self.logger.record("hardware/gpu_mem", gpu_mem)
-
-        # 2. Custom Speedometer
         current_time = time.time()
         steps_processed = len(self.locals["rewards"])
         self.last_step_count += steps_processed
+
+        # 1. Throttled Hardware Metrics (avoid spawning nvidia-smi.exe on every step!)
+        if current_time - self.last_hw_time >= self.hw_poll_interval:
+            self.last_hw_time = current_time
+            self.cached_ram_usage = psutil.virtual_memory().percent
+            try:
+                gpus = GPUtil.getGPUs()
+                if gpus:
+                    self.cached_gpu_load = gpus[0].load * 100
+                    self.cached_gpu_mem = gpus[0].memoryUsed
+            except Exception:
+                pass
+
+        # 2. Throttled Logger Recording
         time_elapsed = current_time - self.last_time
+        if self.n_calls % self.log_interval_steps == 0 or time_elapsed > 1.0:
+            self.logger.record("hardware/ram_usage", self.cached_ram_usage)
+            self.logger.record("hardware/gpu_load", self.cached_gpu_load)
+            self.logger.record("hardware/gpu_mem", self.cached_gpu_mem)
 
-        if time_elapsed > 1.0:
-            steps_per_second = self.last_step_count / time_elapsed
-            self.logger.record("custom/env_steps_per_sec", steps_per_second)
-            self.last_time = current_time
-            self.last_step_count = 0
+            if time_elapsed > 1.0:
+                steps_per_second = self.last_step_count / time_elapsed
+                self.logger.record("custom/env_steps_per_sec", steps_per_second)
+                self.last_time = current_time
+                self.last_step_count = 0
 
-        # 3. Custom Environment Metrics
-        infos = self.locals.get("infos", [])
-        if infos:
-            avg_bank_size = np.mean([info.get("ssim_bank_size", 0) for info in infos])
-            self.logger.record("custom/ssim_bank_size", avg_bank_size)
+            infos = self.locals.get("infos", [])
+            if infos:
+                avg_bank_size = np.mean([info.get("ssim_bank_size", 0) for info in infos])
+                self.logger.record("custom/ssim_bank_size", avg_bank_size)
+                real_faints_this_step = sum([info.get("faints_this_step", 0) for info in infos])
+                self.logger.record("custom/opponent_faints_cumulative", real_faints_this_step)
 
-            real_faints_this_step = sum([info.get("faints_this_step", 0) for info in infos])
-            self.logger.record("custom/opponent_faints_cumulative", real_faints_this_step)
-
-        # 4. Log Action Distribution
+        # 3. Fast Action Distribution Accumulation
         actions = self.locals.get("actions", None)
         if actions is not None:
             self.action_counts += np.sum(actions, axis=0).astype(int)
@@ -112,9 +116,10 @@ class RewardTrackingCallback(BaseCallback):
         self.total_extrinsic += step_extrinsic
         self.total_combined += step_total
 
-        self.logger.record("reward/intrinsic", step_intrinsic)
-        self.logger.record("reward/extrinsic", step_extrinsic)
-        self.logger.record("reward/total", step_total)
+        self.logger.record("reward/intrinsic", step_intrinsic) if self.n_calls % 64 == 0 else None
+        if self.n_calls % 64 == 0:
+            self.logger.record("reward/extrinsic", step_extrinsic)
+            self.logger.record("reward/total", step_total)
 
         return True
 
@@ -209,35 +214,31 @@ class RNDCallback(BaseCallback):
         if obs is None:
             return True
 
-        obs_np = np.array(obs, dtype=np.float32)
-
-        # Extract only the latest frame from the stack: shape (N, 1, 84, 84)
-        if obs_np.ndim == 4:
-            obs_np = obs_np[:, -1:, :, :]
-
-        obs_np = obs_np / 255.0
+        # Slice latest frame BEFORE float32 cast/copy to avoid copying unused stack channels
+        obs_arr = np.asarray(obs)
+        if obs_arr.ndim == 4:
+            obs_arr = obs_arr[:, -1:, :, :]
+        obs_np = np.ascontiguousarray(obs_arr, dtype=np.float32) / 255.0
 
         # Compute normalized intrinsic reward and raw error
         norm_reward, raw_error = self.rnd.compute_intrinsic_reward(obs_np)
         norm_reward = norm_reward.reshape(self.locals["rewards"].shape)
 
         scaled_intrinsic = self.beta * norm_reward
-        original_rewards = self.locals["rewards"].copy()
 
         # Add intrinsic exploration bonus to policy rewards
         self.locals["rewards"] = self.locals["rewards"] + scaled_intrinsic
 
-        self.last_intrinsic = scaled_intrinsic.copy()
-        self.last_total_reward = self.locals["rewards"].copy()
-        self.last_extrinsic = original_rewards.copy()
+        self.last_intrinsic = scaled_intrinsic
 
         infos = self.locals.get("infos", [])
         for i in range(len(infos)):
             infos[i]["rnd_intrinsic_reward"] = scaled_intrinsic[i]
 
-        self.logger.record("rnd/reward_norm_mean", float(np.mean(norm_reward)))
-        self.logger.record("rnd/reward_norm_max", float(np.max(norm_reward)))
-        self.logger.record("rnd/raw_error_mean", float(np.mean(raw_error)))
+        if self.n_calls % 64 == 0:
+            self.logger.record("rnd/reward_norm_mean", float(np.mean(norm_reward)))
+            self.logger.record("rnd/reward_norm_max", float(np.max(norm_reward)))
+            self.logger.record("rnd/raw_error_mean", float(np.mean(raw_error)))
 
         if self.debug and self.n_calls % 100 == 0:
             print(
@@ -323,13 +324,15 @@ class RAMExplorationTrackerCallback(BaseCallback):
     Tracks cumulative unique tiles, unique maps, exploration novelty rate,
     and logs step-by-step per-agent coordinates in-memory with zero I/O overhead.
     """
-    def __init__(self, record_trajectories: bool = True, num_envs: int = 8, verbose: int = 0):
+    def __init__(self, record_trajectories: bool = True, num_envs: int = 8, log_interval_steps: int = 64, verbose: int = 0):
         super().__init__(verbose)
         self.record_trajectories = record_trajectories
         self.num_envs = num_envs
+        self.log_interval_steps = log_interval_steps
         self.global_visited_tiles = set()
         self.global_visited_maps = set()
         self.recent_discoveries = deque(maxlen=500)
+        self.recent_sum = 0
         self.last_total_tiles = 0
         self.agent_trajectories = [[] for _ in range(num_envs)] if record_trajectories else []
 
@@ -348,20 +351,26 @@ class RAMExplorationTrackerCallback(BaseCallback):
                 map_id = (mb, mn)
 
                 is_new = tile not in self.global_visited_tiles
-                self.global_visited_tiles.add(tile)
+                if is_new:
+                    self.global_visited_tiles.add(tile)
                 self.global_visited_maps.add(map_id)
-                self.recent_discoveries.append(1 if is_new else 0)
+                val = 1 if is_new else 0
+                if len(self.recent_discoveries) == self.recent_discoveries.maxlen:
+                    self.recent_sum -= self.recent_discoveries[0]
+                self.recent_discoveries.append(val)
+                self.recent_sum += val
 
                 if self.record_trajectories and i < len(self.agent_trajectories):
                     self.agent_trajectories[i].append((mb, mn, x, y))
 
         total_tiles = len(self.global_visited_tiles)
         total_maps = len(self.global_visited_maps)
-        novelty_rate = float(np.mean(self.recent_discoveries)) if self.recent_discoveries else 0.0
 
-        self.logger.record("exploration/unique_tiles_total", total_tiles)
-        self.logger.record("exploration/unique_maps_total", total_maps)
-        self.logger.record("exploration/novelty_rate", novelty_rate)
+        if self.n_calls % self.log_interval_steps == 0:
+            novelty_rate = self.recent_sum / len(self.recent_discoveries) if self.recent_discoveries else 0.0
+            self.logger.record("exploration/unique_tiles_total", total_tiles)
+            self.logger.record("exploration/unique_maps_total", total_maps)
+            self.logger.record("exploration/novelty_rate", novelty_rate)
 
         if total_tiles > self.last_total_tiles and total_tiles % 25 == 0:
             print(f"[EXPLORATION MILESTONE] Total unique tiles visited: {total_tiles} | Maps: {total_maps}")
@@ -391,6 +400,7 @@ class PeriodicVisualEvalCallback(BaseCallback):
         max_eval_steps=400,
         record_dir="eval_recordings",
         env_name="PokemonFireRed-GBA",
+        n_stack=4,
         verbose=1,
     ):
         super().__init__(verbose)
@@ -399,6 +409,7 @@ class PeriodicVisualEvalCallback(BaseCallback):
         self.record_dir = Path(record_dir)
         self.record_dir.mkdir(parents=True, exist_ok=True)
         self.env_name = env_name
+        self.n_stack = n_stack
         self.eval_count = 0
         self.last_eval_step = 0
 
@@ -422,7 +433,7 @@ class PeriodicVisualEvalCallback(BaseCallback):
         eval_env = create_vectorized_env(
             env_name=self.env_name,
             num_envs=1,
-            n_stack=2,
+            n_stack=self.n_stack,
             exploration_mode="NONE",
         )
 

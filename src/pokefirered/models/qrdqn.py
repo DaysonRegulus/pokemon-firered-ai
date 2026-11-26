@@ -162,18 +162,26 @@ class QRDQNAgent:
         chosen_actions = np.where(random_mask, random_actions, greedy_actions)
         return chosen_actions.tolist()
 
-    def update(self) -> Optional[Dict[str, float]]:
+    def update(self, rnd_module=None, rnd_beta: float = 0.05) -> Optional[Dict[str, float]]:
         """
         Samples a prioritized mini-batch and performs a Quantile Huber Loss gradient step.
+        If `rnd_module` is provided, computes fresh, non-stale RND intrinsic rewards on
+        `next_states` at sample time rather than relying on stale buffered RND values.
         """
         if len(self.buffer) < self.batch_size:
             return None
 
-        # Sample prioritized mini-batch
+        # Sample prioritized mini-batch (rewards contains pure extrinsic reward when rnd_module is passed)
         states, actions, rewards, next_states, dones, is_weights, indices = self.buffer.sample(self.batch_size)
 
         # 1. Compute target quantiles using Double DQN
         with torch.no_grad():
+            effective_rewards = rewards
+            if rnd_module is not None:
+                obs_latest = next_states[:, -1:, :, :]
+                r_rnd = rnd_module.compute_intrinsic_reward_from_tensor(obs_latest)
+                effective_rewards = rewards + (rnd_beta * r_rnd)
+
             # Action selection from online net: a* = argmax_a Q_online(s', a)
             next_q_values = self.online_net.get_q_values(next_states)
             next_actions = next_q_values.argmax(dim=-1) # (B,)
@@ -183,7 +191,7 @@ class QRDQNAgent:
             next_quantiles = next_quantiles_all[torch.arange(self.batch_size), next_actions] # (B, N)
 
             # Bellman target distribution: T = r + gamma * (1 - done) * Z_target
-            target_quantiles = rewards.unsqueeze(1) + self.gamma * (1.0 - dones.unsqueeze(1)) * next_quantiles # (B, N)
+            target_quantiles = effective_rewards.unsqueeze(1) + self.gamma * (1.0 - dones.unsqueeze(1)) * next_quantiles # (B, N)
 
         # 2. Compute current quantiles for selected actions
         current_quantiles_all = self.online_net(states) # (B, num_actions, N)
@@ -246,17 +254,19 @@ class QRDQNAgent:
             self.buffer.save(buf_path)
             print(f"[QRDQN] Saved replay buffer ({len(self.buffer)} samples) to: {buf_path}")
 
-    def load(self, path: Path, load_buffer: bool = True):
-        """Loads agent weights, optimizer state, and Prioritized Replay Buffer."""
+    def load(self, path: Path, load_buffer: bool = True, warm_start: bool = False):
+        """Loads agent weights, optimizer state, and optionally Prioritized Replay Buffer.
+        If `warm_start=True`, transfers learned network weights while keeping num_timesteps=0 and fresh buffer."""
         path = Path(path)
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.online_net.load_state_dict(checkpoint["online_net"])
         self.target_net.load_state_dict(checkpoint["target_net"])
-        self.optimizer.load_state_dict(checkpoint["optimizer"])
-        self.train_steps = checkpoint.get("train_steps", 0)
-        self.num_timesteps = checkpoint.get("num_timesteps", 0)
-        print(f"[QRDQN] Loaded model checkpoint from: {path} (num_timesteps={self.num_timesteps:,}, train_steps={self.train_steps:,})")
-        if load_buffer:
+        if not warm_start:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            self.train_steps = checkpoint.get("train_steps", 0)
+            self.num_timesteps = checkpoint.get("num_timesteps", 0)
+        print(f"[QRDQN] Loaded model checkpoint from: {path} (warm_start={warm_start}, num_timesteps={self.num_timesteps:,}, train_steps={self.train_steps:,})")
+        if load_buffer and not warm_start:
             buf_path = path.with_name(f"{path.stem}_buffer.npz")
             if buf_path.exists():
                 self.buffer.load(buf_path)

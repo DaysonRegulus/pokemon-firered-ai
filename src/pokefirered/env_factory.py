@@ -1,10 +1,8 @@
 from pathlib import Path
 import retro
 import retro.data
-from stable_baselines3.common.atari_wrappers import WarpFrame
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecTransposeImage
 
-from pokefirered.wrappers import ActionFilterWrapper, CustomRewardEnv, StochasticFrameSkip
+from pokefirered.wrappers import ActionFilterWrapper, CustomRewardEnv, StochasticFrameSkip, WarpFrame
 from pokefirered.paths import get_project_root
 
 PROJECT_ROOT = get_project_root()
@@ -34,9 +32,11 @@ def make_single_env(env_name="PokemonFireRed-GBA", state=None, idx=0, render_mod
             env_name,
             **kwargs,
         )
-        wrapped_env = WarpFrame(base_env)  # Grayscale 84x84
-        wrapped_env = CustomRewardEnv(wrapped_env, env_id=idx + 1, exploration_mode=exploration_mode)
-        wrapped_env = StochasticFrameSkip(wrapped_env, n=4, stickprob=0.25)
+        # Skip sub-frames BEFORE WarpFrame and CustomRewardEnv so 84x84 grayscale resizing
+        # and pybind11 RAM extraction execute once per agent step instead of 4x per step.
+        wrapped_env = StochasticFrameSkip(base_env, n=4, stickprob=0.25)
+        wrapped_env = WarpFrame(wrapped_env)  # Grayscale 84x84
+        wrapped_env = CustomRewardEnv(wrapped_env, env_id=idx + 1, exploration_mode=exploration_mode, reward_frame_skip=1)
         wrapped_env = ActionFilterWrapper(wrapped_env)
         return wrapped_env
 
@@ -46,6 +46,7 @@ def make_single_env(env_name="PokemonFireRed-GBA", state=None, idx=0, render_mod
 def create_vectorized_env(
     env_name="PokemonFireRed-GBA",
     state=None,
+    states=None,
     num_envs=1,
     n_stack=2,
     render_mode=None,
@@ -53,14 +54,22 @@ def create_vectorized_env(
 ):
     """
     Create a vectorized, frame-stacked environment.
-    Uses DummyVecEnv if num_envs == 1 or render_mode is set, otherwise SubprocVecEnv.
+    Uses DummyVecEnv if num_envs == 1, otherwise SubprocVecEnv.
+    Optionally accepts `states` (list of save-state names) to distribute
+    environments across a stepping-stone curriculum pool.
     """
+    # Lazy-import SB3 VecEnvs in main process only so SubprocVecEnv workers
+    # never load PyTorch/CUDA DLLs (~1.0-1.6 GB commit per worker on Windows).
+    from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecTransposeImage
+
     register_custom_integrations()
 
-    env_fns = [
-        make_single_env(env_name, state=state, idx=i, render_mode=render_mode, exploration_mode=exploration_mode)
-        for i in range(num_envs)
-    ]
+    env_fns = []
+    for i in range(num_envs):
+        env_state = states[i % len(states)] if states else state
+        env_fns.append(
+            make_single_env(env_name, state=env_state, idx=i, render_mode=render_mode, exploration_mode=exploration_mode)
+        )
 
     if num_envs == 1:
         vec_env = DummyVecEnv(env_fns)

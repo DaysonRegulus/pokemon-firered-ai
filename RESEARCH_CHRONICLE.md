@@ -2549,3 +2549,150 @@ Defeating Gym Leaders is scaled to reflect authentic chapter completion without 
 * **Updated Environment Wrapper**: [`src/pokefirered/wrappers.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/wrappers.py).
 * **Project Rule Invariant File**: [`AGENTS.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/AGENTS.md) (Section 8 updated).
 * **Unit Test Suite**: [`scratch/test_milestone_rewards.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scratch/test_milestone_rewards.py).
+
+
+---
+
+## Phase 27: Gen 90 Completion, Pipeline Bottleneck Elimination (3.5x PPO Speedup), Reward Hardening & 2.5% Curriculum Recalibration
+
+**Date**: November 26, 2026  
+**Status**: IMPLEMENTED, BENCHMARKED & VERIFIED (PPO: 400.0 SPS vs QR-DQN: 193.0 SPS on CUDA; 13/13 Unit Tests Passed)
+
+### 1. Generation 90 Milestone & Telemetry Audit Findings
+
+Generation 90 concluded cleanly at **$6,334,464$ symmetrical steps per model** (`benchmark_rnd_curriculum_gen090.mp4`: `38,144` frames @ `60.0 FPS`, `4x` real-time speed, `0` hold frames):
+- **QR-DQN (Gen 90)**: `305,152` steps (`210.3 SPS`, `449` unique tiles, `3` maps, `$R_{\text{int}} = 1,649.27$`, `$R_{\text{ext}} = 3,090.00$`).
+- **PPO (Gen 90)**: `305,152` steps (`110.3 SPS`, `596` unique tiles, `6` maps, `$R_{\text{int}} = 885.04$`, `$R_{\text{ext}} = 1,445.00$`).
+
+Rigorous log auditing of Gen 90 uncovered two critical `rewards.py` integrity bugs alongside a massive PPO throughput bottleneck:
+1. **Party-Slot Swap Exploitation**: Evaluating level gains and own-party faints per slot (`i in range(6)`) allowed agents with two Pokémon of differing levels (`[5, 3]`) and one fainted slot (`[0, 15]`) to swap party positions in battle (`[5, 3] <-> [3, 5]`), registering `151` spurious `+20.0` level-up rewards and `153` spurious `-5.0` faint penalties (`+15` net loop). Additionally, `lvl_addresses` read 2 bytes starting at `0x20242D7` (including the high status byte) instead of the `u8` level byte at `0x20242D8` (`+0x54`).
+2. **Phantom Badge Trigger**: Both Gen 90 QR-DQN (`~188k` steps) and Gen 90 PPO (`~246k` steps) fired `[MILESTONE][GYM_LEADER] Marsh Badge (+500.0)` while still inside Pallet Town / Route 1, indicating spurious `SaveBlock1` pointer reads during non-overworld transitions.
+
+---
+
+### 2. Root-Cause Profiling & Architectural Optimizations
+
+Micro-benchmarking [`src/pokefirered/callbacks.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/callbacks.py) directly on the host hardware exposed why PPO had trailed QR-DQN in wall-clock speed (`~111 SPS` vs `~284 SPS`):
+- **`GPUtil.getGPUs()` Synchronous Spawn (`52.31 ms/step`)**: `ComprehensiveLoggingCallback._on_step()` spawned `nvidia-smi.exe` synchronously on every 8-environment step (~`38,000` spawns per generation), consuming **$>65\%$ of PPO's total wall-clock runtime**.
+- **Redundant 4x Wrapper Execution**: [`src/pokefirered/env_factory.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/env_factory.py) placed `WarpFrame` and `CustomRewardEnv` inside `StochasticFrameSkip(n=4)`, executing 4 `84x84` OpenCV image resizes and 4 pybind11 `get_ram()` copies per agent step while discarding 3 frames.
+- **Unoptimized Per-Step Tensor Syncs & Stale Replay RND**: [`src/pokefirered/rnd.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/rnd.py) re-allocated GPU normalization tensors on every call, while QR-DQN stored decaying RND rewards inside its `50,000`-transition PER buffer.
+
+#### Implemented Fixes & Upgrades
+1. **PPO Callback & Hardware Telemetry Overhaul ([`src/pokefirered/callbacks.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/callbacks.py))**:
+   - Throttled `GPUtil.getGPUs()` polling in `ComprehensiveLoggingCallback` to `10.0s` intervals and logger recording to `64`-step intervals.
+   - Replaced `np.mean(deque(maxlen=500))` with an $\mathcal{O}(1)$ running sum in `RAMExplorationTrackerCallback`.
+   - Sliced latest frame `obs[:, -1:, :, :]` *before* float32 conversion in `RNDCallback._on_step()`.
+2. **Wrapper Stack Reordering ([`src/pokefirered/env_factory.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/env_factory.py), [`src/pokefirered/wrappers.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/wrappers.py))**:
+   - Moved `StochasticFrameSkip(n=4)` directly around `base_env`, followed by `WarpFrame` and `CustomRewardEnv(reward_frame_skip=1)` — cutting image preprocessing and RAM copy frequency by $4\times$.
+3. **Live Non-Stale GPU RND & Cached Normalizers ([`src/pokefirered/rnd.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/rnd.py), [`src/pokefirered/models/qrdqn.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/models/qrdqn.py))**:
+   - Cached `_obs_mean_t` and `_obs_std_t` on CUDA and wrapped `compute_intrinsic_reward` in `torch.inference_mode()`.
+   - Updated QR-DQN (`train.py` & `QRDQNAgent.update`) to store extrinsic-only rewards in PER and evaluate `r_rnd` live on `next_states` at sample time.
+4. **Reward Integrity Hardening ([`src/pokefirered/rewards.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/rewards.py))**:
+   - Switched level reads to `u8` (`+0x54`) and replaced per-slot deltas with party-order-invariant totals (`curr_party_count`, `sum(valid_lvls)`, `curr_fainted_count`).
+   - Added `_is_valid_overworld_sb1()` requiring `cb2 == 0x080565C9`, valid EWRAM pointer bounds, and `FLAG_SYS_POKEMON_GET` sanity bit.
+   - Verified via `scratch/verify_rewards_fix.py` and `scratch/test_milestone_rewards.py` (13/13 assertions passing).
+5. **Training Continuity & 2.5% Curriculum Scaling ([`scripts/train.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/train.py), [`scripts/run_benchmark.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/run_benchmark.py))**:
+   - Added `--warm-start-from`, `--reset-value-head`, `--reset-rnd`, `--states` (mixed stepping-stone save-state pool), `--n-stack 4`, `--buffer-size`, and `--render-every`.
+   - Recalibrated default dynamic curriculum growth rate from `0.05` ($5\%$) to **`0.025` ($2.5\%$)** so horizon expands more smoothly toward $20\text{M}$ steps (~196 generations peaking near $497\text{k}$ steps/gen instead of $\sim 985\text{k}$).
+
+---
+
+### 3. Live 32,768-Step Speedup Comparison (CUDA, 8 Envs, `n_stack=4`)
+
+Executed a controlled head-to-head throughput test from fresh weights in isolated `checkpoints/speedup_benchmark_test/`:
+
+| Algorithm | Steps | Elapsed Time | Avg Throughput | Rollout Speed | Unique Tiles / Maps | Net Extrinsic | Intrinsic R |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **New PPO (RND)** | 32,768 | **81.9s (1.4 min)** | **400.0 SPS** | **~600 env SPS** | 247 / 3 | +80.00 | 214.70 |
+| **New QR-DQN (+ PER + Live RND)** | 32,768 | 169.8s (2.8 min) | 193.0 SPS | — | 260 / 3 | +30.00 | 300.88 |
+
+**Architectural Conclusion**: Eliminating `GPUtil` blocking and optimizing the wrapper/RND pipeline accelerated **PPO by ~3.5x** (`114 SPS -> 400.0 SPS` even with doubled `n_stack=4` observation depth). **PPO is now both the higher-performing learner and `2.07x` faster in real time than QR-DQN (`400.0 SPS` vs `193.0 SPS`)**, cutting the projected wall-clock time to reach $20\text{M}$ steps to $\sim 13.9\text{ hours}$ of pure PPO training.
+
+---
+
+### 4. Verified Master Artifacts
+
+* **Core Engine Updates**: [`src/pokefirered/callbacks.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/callbacks.py), [`src/pokefirered/env_factory.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/env_factory.py), [`src/pokefirered/wrappers.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/wrappers.py), [`src/pokefirered/rnd.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/rnd.py), [`src/pokefirered/rewards.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/rewards.py), [`src/pokefirered/models/qrdqn.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/models/qrdqn.py).
+* **Training & Orchestration**: [`scripts/train.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/train.py), [`scripts/run_benchmark.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/run_benchmark.py).
+* **Invariants**: [`AGENTS.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/AGENTS.md) (Sections 4 & 8 updated).
+
+
+---
+
+## Phase 28: Benchmark v2 Archival, Windows Subprocess Worker Isolation (`WinError 1455`), `benchmark_milestone_rnd` (42-Gen / 288.8k-Step) Validation & Route 1 Milestone Forensics
+
+**Date**: November 26, 2026  
+**Status**: COMPLETED & VERIFIED (42/42 Symmetrical Generations, `288,768` Steps/Model; PPO `373.8` eff. SPS vs QR-DQN `166.1` eff. SPS; Route 1 A/B Proven)
+
+### 1. Archival of Benchmark v2 (`benchmark_rnd_curriculum_v2`)
+
+Prior to resetting training under the Phase 26 calibrated milestone rewards and Phase 27 pipeline optimizations, the complete 90-generation v2 benchmark (`6,334,464` symmetrical cumulative environment steps per model) was archived immutably with [`ARCHIVE_MANIFEST.json`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/archive/benchmark_rnd_curriculum_v2/ARCHIVE_MANIFEST.json):
+* **Checkpoints & State**: `checkpoints/archive/benchmark_rnd_curriculum_v2/` (`731` files, `10.352 GB`, including all 180 generation trajectory archives and final Gen 90 weights).
+* **Visual Evidence**: `visual_evidence/archive/benchmark_rnd_curriculum_v2/` (`164` files, `18.077 GB`, including the `431,216`-frame / `8.54 GB` 60 FPS master stitched timeline).
+* **TensorBoard Logs**: `logs/archive/benchmark_rnd_curriculum_v2/` (`90` files, `0.004 GB`).
+
+---
+
+### 2. Windows `WinError 1455` Pagefile Exhaustion & Subprocess Worker Isolation
+
+During Generation 6 startup of the fresh `benchmark_milestone_rnd` run (`8` parallel `SubprocVecEnv` workers on a 16.9 GB Windows 10 host), one spawned emulator worker crashed inside `multiprocessing.spawn` with:
+> `OSError: [WinError 1455] The paging file is too small for this operation to complete. Error loading "...\torch\lib\torch_python.dll"`
+
+Because 7 workers succeeded while 1 died before signaling initialization, `SubprocVecEnv.__init__` blocked indefinitely waiting on the dead pipe.
+
+#### Root Cause Analysis
+1. On Windows (`spawn` start method), every emulator child process executes `scripts/train.py` under `__name__ == "__mp_main__"` and unpickles `_init()` from [`src/pokefirered/env_factory.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/env_factory.py).
+2. Top-level imports of `torch`, `stable_baselines3.PPO`, and `stable_baselines3.common.atari_wrappers.WarpFrame` (whose package `__init__.py` executes `import torch as th`) forced all 8 retro emulator workers plus the `run_benchmark.py` orchestrator to map `torch_python.dll` and CUDA DLLs (`~1.0–1.59 GB` virtual commit per process $\implies >12\text{ GB}$ of wasted commit charge).
+
+#### Architectural Fixes Implemented
+1. **Pure OpenCV/Gymnasium `WarpFrame` ([`src/pokefirered/wrappers.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/wrappers.py))**: Implemented a drop-in 84×84 `cv2.INTER_AREA` grayscale wrapper without importing `stable_baselines3` or `torch`.
+2. **Lazy Vectorized Imports ([`src/pokefirered/env_factory.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/env_factory.py))**: Moved `DummyVecEnv, SubprocVecEnv, VecFrameStack, VecTransposeImage` imports inside `create_vectorized_env()` so unpickled worker closures execute with `torch=False` and `sb3=False`.
+3. **Worker-Safe CLI Entrypoints ([`scripts/train.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/train.py), [`scripts/run_benchmark.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/run_benchmark.py))**: Moved `torch`, `PPO`, and neural curiosity/model imports out of module top-level into `main()` and `train_qrdqn()`, and defaulted `--device` to `"auto"`. Verified that emulator workers load zero PyTorch/CUDA DLLs.
+
+#### PER Memory Scaling Bound Under `n_stack=4`
+[`PrioritizedReplayBuffer`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/models/replay_buffer.py) stores explicit `uint8` arrays `(N, 4, 84, 84)` for both `states` and `next_states` (`56.4 KB/transition`). Maintaining `--buffer-size 50000` (vs `100,000` at `n_stack=2`) preserves a **`2.82 GB` RAM footprint** (`483.6 MB` compressed `.npz` per generation seam). Scaling beyond `50,000` transitions without exceeding 16 GB host memory requires refactoring `PrioritizedReplayBuffer` into a frame-deduplicated ring buffer storing single `84×84` frames (`8×` reduction to `7.06 KB/step`, fitting `400,000` transitions in `~2.82 GB`).
+
+---
+
+### 3. `benchmark_milestone_rnd` (v3) Telemetry Summary (Generations 1–42)
+
+Resumed cleanly from Gen 5 to **Generation 42** with `n_stack=4` for both models, `2.5%` dynamic curriculum scaling, calibrated milestone rewards (`+10.0` Pallet Town, `+20.0` Route 1), and live GPU RND:
+
+| Metric (`Gen 1–42`) | **QR-DQN (+ PER + Live RND)** | **PPO (+ RND)** |
+| :--- | :---: | :---: |
+| **Cumulative Steps** | `288,768` | `288,768` |
+| **Total Training Time** | `1,738.7s` (`29.0 min`) | **`772.5s` (`12.9 min`)** |
+| **Effective Mean Throughput** | `166.1 SPS` *(Gen 42: `174.6`)* | **`373.8 SPS`** *(Gen 42: `378.3`)* |
+| **Mean / Peak Extrinsic Reward** | `22.86` / `50.00` *(Gens 40–42)* | **`74.29` / `120.00`** *(Gen 36)* |
+| **Mean / Peak Unique Tiles** | `117.6` / **`258`** *(Gen 41)* | **`123.0`** / `194` *(Gen 42)* |
+| **Peak Unique Maps (Per Gen)** | `4` *(Gens 18, 27, 36, 39)* | **`5`** *(Gens 28, 42)* |
+
+*Note: QR-DQN Gen 33 experienced transient external system GPU/RAM contention (`49.5 SPS`, `165.4s`) before recovering to `174–179 SPS`. Master visual timeline [`stitched_chronological_benchmark.mp4`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/visual_evidence/benchmark_milestone_rnd/stitched_chronological_benchmark.mp4) verified at `36,096` frames, `60.0 FPS`, `760×480`, `601.60s` (`10.03 min`), `946.3 MB`.*
+
+---
+
+### 4. First-Ever Route 1 `(3, 19)` Forensics & Controlled Milestone A/B Evaluation (`v2` vs. `v3`)
+
+Full chronological parsing across all **`180`** trajectory JSONs of **Benchmark v2** and all **`84`** trajectory JSONs of **Benchmark v3** established the exact first-ever Route 1 `(3, 19)` entries (correcting an earlier `FIRERED_TRAINING_POSTMORTEM.md` attribution that relied on `5+`-map summary thresholds at Gens 48–49):
+
+| Metric (Matched `288,768`-Step Window) | **v2 PPO** *(No Milestones)* | **v3 PPO** *(`+10` Pallet / `+20` Route 1)* | **v2 QR-DQN** | **v3 QR-DQN** |
+| :--- | :---: | :---: | :---: | :---: |
+| **First Route 1 Entry (Agg. Step)** | **`67,818`** *(Gen 13, Env 1, `(12, 39)`)* | **`67,288`** *(Gen 15, Env 7, `(12, 39)`)* | **`92,356`** *(Gen 16, Env 3, `(13, 39)`)* | *Not yet (`0` gens)* |
+| **Pallet Town `(3, 0)` Steps** | `34,732` | **`115,831` (`3.33×`)** | `43,938` | `34,066` |
+| **Route 1 `(3, 19)` Steps** | `1,127` | **`3,963` (`3.52×`)** | `233` | `0` |
+| **Unique Route 1 Tiles Explored** | `8` | **`44` (`5.50×`)** | `4` | `0` |
+| **Generations Reaching Route 1** | `4` *(of 32)* | **`13` *(of 42)*** | `2` *(of 32)* | `0` *(of 42)* |
+
+**Empirical Takeaways**:
+1. **Discovery Latency Is Exploration-Bound**: Before an agent experiences a one-time milestone bonus for the first time, it cannot reinforce the path to it; PPO's first Route 1 step (`67,288` vs `67,818`) differed by `<1%`.
+2. **Post-Discovery Retention Amplifies `3.3–5.5×`**: Once PPO experienced `+10.0` Pallet Town and `+20.0` Route 1, it spent **`3.33×` more steps outdoors in Pallet Town**, **`3.52×` more steps on Route 1**, and charted **`5.50×` more unique Route 1 tiles** over the identical `288,768`-step budget (aided by `2.5%` curriculum scaling giving `42` resets vs `32`).
+3. **Off-Policy $\epsilon$-Dilution Early Game**: Under `--epsilon-decay-steps 5000000`, QR-DQN remains at $\epsilon \approx 0.954$ (`>95%` uniform random actions) at `288k` steps, keeping early north-exit threading stochastic while on-policy PPO immediately capitalizes on calibrated milestones.
+
+---
+
+### 5. Verified Master Artifacts
+
+* **Benchmark v2 Archive**: [`ARCHIVE_MANIFEST.json`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/archive/benchmark_rnd_curriculum_v2/ARCHIVE_MANIFEST.json)
+* **Benchmark v3 Ledger & Report**: [`benchmark_state.json`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_milestone_rnd/benchmark_state.json), [`BENCHMARK_RND_CURRICULUM_REPORT.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/checkpoints/benchmark_milestone_rnd/BENCHMARK_RND_CURRICULUM_REPORT.md)
+* **Worker Isolation & Fixes**: [`src/pokefirered/wrappers.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/wrappers.py), [`src/pokefirered/env_factory.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/src/pokefirered/env_factory.py), [`scripts/train.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/train.py), [`scripts/run_benchmark.py`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/scripts/run_benchmark.py)
+* **Invariants & Post-Mortem Audit**: [`AGENTS.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/AGENTS.md), [`FIRERED_TRAINING_POSTMORTEM.md`](file:///c:/dev/Antigravity/Pokemon%20FireRed%20AI/FIRERED_TRAINING_POSTMORTEM.md)

@@ -170,12 +170,12 @@ class RewardManager:
         ]
 
         self.lvl_addresses = [
-            0x20242D7 - BASE,
-            0x202433B - BASE,
-            0x202439F - BASE,
-            0x2024403 - BASE,
-            0x2024467 - BASE,
-            0x20244CB - BASE,
+            0x20242D8 - BASE,
+            0x202433C - BASE,
+            0x20243A0 - BASE,
+            0x2024404 - BASE,
+            0x2024468 - BASE,
+            0x20244CC - BASE,
         ]
 
         self.oppn_hp_addresses = [
@@ -188,13 +188,27 @@ class RewardManager:
         ]
 
         self.oppn_lvl_addresses = [
-            0x202407F - BASE,
-            0x20240E3 - BASE,
-            0x2024147 - BASE,
-            0x20241AB - BASE,
-            0x202420F - BASE,
-            0x2024273 - BASE,
+            0x2024080 - BASE,
+            0x20240E4 - BASE,
+            0x2024148 - BASE,
+            0x20241AC - BASE,
+            0x2024210 - BASE,
+            0x2024274 - BASE,
         ]
+
+    def _is_valid_overworld_sb1(self, ram, sb1_ptr):
+        """
+        Verifies GBA is in overworld callback (cb2 == 0x080565C9) and sb1_ptr points
+        inside valid EWRAM SaveBlock1 bounds with FLAG_SYS_POKEMON_GET active.
+        Prevents phantom badge reads during non-overworld transitions or DMA shifts.
+        """
+        if not (0x20000 <= sb1_ptr < len(ram) - 0x1000):
+            return False
+        cb2 = int.from_bytes(ram[0x430F4:0x430F8], "little")
+        if cb2 != 0x080565C9:
+            return False
+        sys_flags_byte = int(ram[sb1_ptr + 0xEE0 + 261])
+        return bool(sys_flags_byte & 0x01)
 
     def initialize(self):
         ram = self.env.unwrapped.get_ram()
@@ -204,7 +218,11 @@ class RewardManager:
         self.prev_total_hp = sum(self.prev_party_hp)
         self.prev_party_lvl = [self.get_lvl(ram, i) for i in range(6)]
         self.prev_oppn_lvl = [self.get_oppn_lvl(ram, i) for i in range(6)]
-        self.prev_total_lvl = sum(self.prev_party_lvl)
+        self.prev_total_lvl = sum(l for l in self.prev_party_lvl if 0 < l <= 100)
+        self.prev_party_count = sum(1 for l in self.prev_party_lvl if 0 < l <= 100)
+        self.prev_fainted_count = sum(
+            1 for hp, l in zip(self.prev_party_hp, self.prev_party_lvl) if 0 < l <= 100 and hp == 0
+        )
         self.pending_faint = [False] * 6
         self.faint_count_this_step = 0
 
@@ -215,7 +233,7 @@ class RewardManager:
 
         # Initialize existing badges to prevent false re-rewarding
         sb1_ptr = int.from_bytes(ram[0x45008:0x4500C], "little") - BASE
-        if 0 <= sb1_ptr < len(ram) - 0x1000:
+        if self._is_valid_overworld_sb1(ram, sb1_ptr):
             self.prev_badge_byte = int(ram[sb1_ptr + 0xEE0 + 260])
             self.awarded_badges = {i for i in range(8) if (self.prev_badge_byte & (1 << i))}
         else:
@@ -237,7 +255,7 @@ class RewardManager:
 
     def get_lvl(self, ram, index):
         addr = self.lvl_addresses[index]
-        return (int(ram[addr]) << 8) | int(ram[addr + 1])
+        return int(ram[addr])
 
     def get_oppn_hp(self, ram, index):
         addr = self.oppn_hp_addresses[index]
@@ -245,7 +263,7 @@ class RewardManager:
 
     def get_oppn_lvl(self, ram, index):
         addr = self.oppn_lvl_addresses[index]
-        return (int(ram[addr]) << 8) | int(ram[addr + 1])
+        return int(ram[addr])
 
     def calculate_avg_level(self, levels):
         valid_levels = [lvl for lvl in levels if 0 < lvl <= 100]
@@ -288,9 +306,11 @@ class RewardManager:
                 if self.verbosity['exploration']:
                     print(f"[REWARD][EXPLORATION] New location discovered (+{self.exploration_multiplier:.2f})")
 
-        # Retrieve and compute average levels
+        # Retrieve party/opponent levels & counts (order-invariant across slot swaps)
         current_party_lvl = [self.get_lvl(ram, i) for i in range(6)]
-        current_total_lvl = sum(current_party_lvl)
+        valid_party_lvls = [lvl for lvl in current_party_lvl if 0 < lvl <= 100]
+        curr_party_count = len(valid_party_lvls)
+        current_total_lvl = sum(valid_party_lvls)
         current_oppn_lvl = [self.get_oppn_lvl(ram, i) for i in range(6)]
         player_avg_level = self.calculate_avg_level(current_party_lvl)
         opponent_avg_level = self.calculate_avg_level(current_oppn_lvl)
@@ -302,14 +322,16 @@ class RewardManager:
         current_party_hp = [self.get_hp(ram, i) for i in range(6)]
         current_total_hp = sum(current_party_hp)
         current_oppn_hp = [self.get_oppn_hp(ram, i) for i in range(6)]
+        curr_fainted_count = sum(
+            1 for hp, lvl in zip(current_party_hp, current_party_lvl) if 0 < lvl <= 100 and hp == 0
+        )
 
-        # Check for fainted Pokémon
-        for i in range(6):
-            if self.prev_party_hp[i] > 0 and current_party_hp[i] == 0:
-                # Penalty for own Pokémon fainting
-                total_reward -= 5
-                if self.verbosity['faint']:
-                    print(f"[PENALTY][FAINT] Pokémon {i + 1} fainted (-5)")
+        # Check for fainted Pokémon (party-order invariant: prevents slot-swap faint spam)
+        if curr_party_count == self.prev_party_count and curr_fainted_count > self.prev_fainted_count:
+            newly_fainted = curr_fainted_count - self.prev_fainted_count
+            total_reward -= 5 * newly_fainted
+            if self.verbosity['faint']:
+                print(f"[PENALTY][FAINT] {newly_fainted} party Pokémon fainted (-{5 * newly_fainted})")
 
         # --- Opponent Fainting Check ---
         for i in range(6):
@@ -343,24 +365,20 @@ class RewardManager:
 
                 self.pending_faint[i] = False
 
-        # --- Level Gain Reward ---
-        level_diff = 0
-        for i in range(6):
-            # Only count true level gains for Pokémon that were already in the party
-            if self.prev_party_lvl[i] > 0 and 0 < current_party_lvl[i] <= 100 and current_party_lvl[i] > self.prev_party_lvl[i]:
-                level_diff += current_party_lvl[i] - self.prev_party_lvl[i]
-
-        if level_diff > 0:
-            total_reward += level_diff * self.level_gain_multiplier
-            if self.verbosity['general']:
-                print(f"[REWARD][LEVEL] Total party level increased by {level_diff} (+{level_diff * self.level_gain_multiplier:.2f})")
+        # --- Level Gain Reward (party-order invariant: prevents [5, 3] <-> [3, 5] swap farming) ---
+        if curr_party_count == self.prev_party_count and curr_party_count > 0:
+            level_diff = current_total_lvl - self.prev_total_lvl
+            if 0 < level_diff <= 10:
+                total_reward += level_diff * self.level_gain_multiplier
+                if self.verbosity['general']:
+                    print(f"[REWARD][LEVEL] Total party level increased by {level_diff} (+{level_diff * self.level_gain_multiplier:.2f})")
 
         # --- New Pokémon Catch Reward ---
-        for i in range(6):
-            if current_party_lvl[i] > 0 and self.prev_party_lvl[i] == 0:
-                total_reward += 10  # Fixed reward for catching a new Pokémon
-                if self.verbosity['general']:
-                    print(f"[REWARD][CATCH] A new Pokémon was caught in slot {i + 1} (+10)")
+        if self.prev_party_count > 0 and curr_party_count > self.prev_party_count:
+            newly_caught = curr_party_count - self.prev_party_count
+            total_reward += 10 * newly_caught
+            if self.verbosity['general']:
+                print(f"[REWARD][CATCH] {newly_caught} new Pokémon caught (+{10 * newly_caught})")
 
         # --- Mathematically Calibrated Milestone Rewards (No Handholding, Scaled to Combat/RND Signals) ---
         BASE = 0x02000000
@@ -380,7 +398,7 @@ class RewardManager:
 
         # --- Massive Milestone: Defeating Gym Leaders / Winning Gym Badges (+250.0 to +600.0) ---
         sb1_ptr = int.from_bytes(ram[0x45008:0x4500C], "little") - BASE
-        if 0 <= sb1_ptr < len(ram) - 0x1000:
+        if self._is_valid_overworld_sb1(ram, sb1_ptr):
             current_badge_byte = int(ram[sb1_ptr + 0xEE0 + 260])
             for b_idx in range(8):
                 if (current_badge_byte & (1 << b_idx)) and (b_idx not in self.awarded_badges):
@@ -397,6 +415,8 @@ class RewardManager:
         self.prev_oppn_hp = current_oppn_hp
         self.prev_party_lvl = current_party_lvl
         self.prev_total_lvl = current_total_lvl
+        self.prev_party_count = curr_party_count
+        self.prev_fainted_count = curr_fainted_count
         self.prev_oppn_lvl = current_oppn_lvl
 
         return total_reward

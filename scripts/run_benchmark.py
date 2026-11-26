@@ -24,7 +24,6 @@ import sys
 import time
 from typing import Dict, List, Optional, Tuple
 import cv2
-import torch
 
 # Force UTF-8 encoding and unbuffered output on standard streams
 if hasattr(sys.stdout, "reconfigure"):
@@ -39,7 +38,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 def compute_dynamic_timesteps(
     lifetime_steps: int,
     min_steps: int = 4096,
-    growth_rate: float = 0.05,
+    growth_rate: float = 0.025,
     quantize: int = 2048
 ) -> int:
     """Computes quantized dynamic curriculum training timesteps."""
@@ -63,17 +62,21 @@ def parse_args():
         help="Absolute target generation milestone to run until (overrides relative --generations)"
     )
     parser.add_argument("--num-envs", type=int, default=8, help="Number of parallel environments (default: 8)")
+    parser.add_argument("--n-stack", type=int, default=4, help="Number of stacked grayscale frames (default: 4)")
     parser.add_argument("--min-timesteps", type=int, default=4096, help="Base minimum timesteps for Gen 1 (default: 4096)")
-    parser.add_argument("--growth-rate", type=float, default=0.05, help="Dynamic curriculum growth rate (default: 0.05)")
+    parser.add_argument("--growth-rate", type=float, default=0.025, help="Dynamic curriculum growth rate (default: 0.025 = 2.5%%)")
     parser.add_argument("--quantize", type=int, default=2048, help="Step quantization quantum (default: 2048)")
+    parser.add_argument("--buffer-size", type=int, default=50_000, help="QR-DQN replay buffer size (default: 50,000)")
+    parser.add_argument("--states", type=str, default=None, help="Optional comma-separated save states for curriculum mix")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints/benchmark_rnd_curriculum", help="Checkpoints directory")
     parser.add_argument("--log-dir", type=str, default="logs/benchmark_rnd_curriculum", help="TensorBoard logs directory")
     parser.add_argument("--visual-dir", type=str, default="visual_evidence/benchmark_rnd_curriculum", help="Visual evidence directory")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Compute device")
+    parser.add_argument("--device", type=str, default="auto", help="Compute device (auto/cuda/cpu)")
     parser.add_argument("--ent-coef", type=float, default=0.08, help="Entropy coefficient for PPO (default: 0.08)")
     parser.add_argument("--epsilon-start", type=float, default=1.0, help="Initial exploration rate for QR-DQN (default: 1.0)")
     parser.add_argument("--epsilon-end", type=float, default=0.20, help="Final exploration rate / epsilon-floor for QR-DQN (default: 0.20)")
     parser.add_argument("--epsilon-decay-steps", type=int, default=5_000_000, help="Epsilon decay steps for QR-DQN (default: 5,000,000)")
+    parser.add_argument("--render-every", type=int, default=1, help="Render MP4 swarm video every N generations (default: 1)")
     parser.add_argument("--fresh", action="store_true", help="Force fresh benchmark start, ignoring existing benchmark_state.json")
     parser.add_argument("--no-render", action="store_true", help="Disable per-generation swarm rendering and video stitching")
     return parser.parse_args()
@@ -334,6 +337,8 @@ def main():
                 "--algo", "QRDQN",
                 "--exploration", "RND",
                 "--num-envs", str(args.num_envs),
+                "--n-stack", str(args.n_stack),
+                "--buffer-size", str(args.buffer_size),
                 "--timesteps", str(dqn_steps_for_gen),
                 "--generation", str(gen),
                 "--checkpoint-dir", str(args.checkpoint_dir),
@@ -343,6 +348,8 @@ def main():
                 "--epsilon-end", str(args.epsilon_end),
                 "--epsilon-decay-steps", str(args.epsilon_decay_steps),
             ]
+            if args.states:
+                cmd_dqn.extend(["--states", args.states])
             if gen == 1 and state["qrdqn_lifetime_steps"] == 0:
                 cmd_dqn.append("--fresh")
 
@@ -391,6 +398,7 @@ def main():
                 "--algo", "PPO",
                 "--exploration", "RND",
                 "--num-envs", str(args.num_envs),
+                "--n-stack", str(args.n_stack),
                 "--timesteps", str(ppo_steps_for_gen),
                 "--generation", str(gen),
                 "--checkpoint-dir", str(args.checkpoint_dir),
@@ -398,6 +406,8 @@ def main():
                 "--device", args.device,
                 "--ent-coef", str(args.ent_coef),
             ]
+            if args.states:
+                cmd_ppo.extend(["--states", args.states])
             if gen == 1 and state["ppo_lifetime_steps"] == 0:
                 cmd_ppo.append("--fresh")
 
@@ -427,7 +437,7 @@ def main():
         # -------------------------------------------------------------
         # Phase 3: Visual Swarm Video Rendering & Timeline Stitching
         # -------------------------------------------------------------
-        if not args.no_render:
+        if not args.no_render and (gen % max(1, args.render_every) == 0 or gen == target_generation):
             gen_mp4 = visual_dir / f"benchmark_rnd_curriculum_gen{gen:03d}.mp4"
 
             is_new_render = False

@@ -110,18 +110,22 @@ class RNDModule:
 
         self.optimizer = torch.optim.Adam(self.predictor.parameters(), lr=lr)
 
-        # Running normalizers
+        # Running normalizers + cached GPU tensors to avoid per-step HtoD allocations
         self.rms_obs = RunningMeanStd(shape=obs_shape)
         self.rms_reward = RunningMeanStd(shape=())
+        self._obs_mean_t = torch.zeros(obs_shape, dtype=torch.float32, device=self.device)
+        self._obs_std_t = torch.ones(obs_shape, dtype=torch.float32, device=self.device)
+
+    def _sync_obs_stats_to_device(self):
+        self._obs_mean_t = torch.as_tensor(self.rms_obs.mean, dtype=torch.float32, device=self.device)
+        self._obs_std_t = torch.as_tensor(self.rms_obs.std, dtype=torch.float32, device=self.device)
 
     def normalize_obs(self, obs_tensor):
         """
-        Normalize observation tensor [B, C, H, W] using running mean and std.
+        Normalize observation tensor [B, C, H, W] using cached GPU mean and std.
         Clips values to [-5, 5] for numerical stability.
         """
-        mean = torch.as_tensor(self.rms_obs.mean, dtype=torch.float32, device=self.device)
-        std = torch.as_tensor(self.rms_obs.std, dtype=torch.float32, device=self.device)
-        norm_obs = (obs_tensor - mean) / std
+        norm_obs = (obs_tensor - self._obs_mean_t) / self._obs_std_t
         return torch.clamp(norm_obs, -5.0, 5.0)
 
     def compute_intrinsic_reward(self, obs_raw_np):
@@ -130,14 +134,13 @@ class RNDModule:
         obs_raw_np: numpy array of shape [B, C, H, W] in range [0, 1]
         """
         self.rms_obs.update(obs_raw_np)
+        self._sync_obs_stats_to_device()
 
-        obs_tensor = torch.as_tensor(obs_raw_np, dtype=torch.float32, device=self.device)
-        obs_norm = self.normalize_obs(obs_tensor)
-
-        with torch.no_grad():
+        with torch.inference_mode():
+            obs_tensor = torch.as_tensor(obs_raw_np, dtype=torch.float32, device=self.device)
+            obs_norm = self.normalize_obs(obs_tensor)
             target_feat = self.target(obs_norm)
             pred_feat = self.predictor(obs_norm)
-            # MSE per sample
             raw_error = torch.mean((pred_feat - target_feat) ** 2, dim=1).cpu().numpy()
 
         self.rms_reward.update(raw_error)
@@ -147,6 +150,19 @@ class RNDModule:
         clipped_reward = np.clip(normalized_reward, 0.0, self.clip_val)
 
         return clipped_reward, raw_error
+
+    def compute_intrinsic_reward_from_tensor(self, obs_tensor):
+        """
+        Pure-GPU RND reward evaluation on a batch tensor [B, 1, H, W] in [0, 1]
+        without mutating running normalization stats (for off-policy replay re-evaluation).
+        """
+        with torch.no_grad():
+            obs_norm = self.normalize_obs(obs_tensor)
+            target_feat = self.target(obs_norm)
+            pred_feat = self.predictor(obs_norm)
+            raw_error = torch.mean((pred_feat - target_feat) ** 2, dim=1)
+            std_val = float(self.rms_reward.std) + 1e-8
+            return torch.clamp(raw_error / std_val, 0.0, self.clip_val)
 
     def train_batch(self, obs_raw_np, epochs=4, batch_size=256):
         """
@@ -209,3 +225,4 @@ class RNDModule:
         self.rms_reward.mean = checkpoint["rms_reward_mean"]
         self.rms_reward.var = checkpoint["rms_reward_var"]
         self.rms_reward.count = checkpoint["rms_reward_count"]
+        self._sync_obs_stats_to_device()

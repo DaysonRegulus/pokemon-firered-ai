@@ -10,8 +10,6 @@ from pathlib import Path
 import sys
 import time
 import numpy as np
-import torch
-from stable_baselines3 import PPO
 
 # Force UTF-8 and unbuffered output on standard streams
 if hasattr(sys.stdout, "reconfigure"):
@@ -23,27 +21,12 @@ if hasattr(sys.stderr, "reconfigure"):
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from pokefirered.callbacks import (
-    ComprehensiveLoggingCallback,
-    RewardTrackingCallback,
-    RNDCallback,
-    SSIMCallback,
-    CoordinateExplorationCallback,
-    RAMExplorationTrackerCallback,
-    PeriodicVisualEvalCallback,
-)
-from pokefirered.coord_module import CoordinateExplorationModule
-from pokefirered.env_factory import create_vectorized_env
-from pokefirered.rnd import RNDModule
-from pokefirered.ssim_module import OptimizedSSIMModule
-from pokefirered.models import QRDQNAgent
 
-
-def compute_dynamic_timesteps(lifetime_steps: int, min_steps: int = 4096, growth_rate: float = 0.05, quantize: int = 2048) -> int:
+def compute_dynamic_timesteps(lifetime_steps: int, min_steps: int = 4096, growth_rate: float = 0.025, quantize: int = 2048) -> int:
     """
     Computes dynamic training horizon based on model lifetime:
         dynamic_steps = round((min_steps + lifetime * growth_rate) / quantize) * quantize
-    Clamped to minimum of quantize (default: 2048).
+    Clamped to minimum of quantize (default: 2048). Growth rate defaults to 2.5% (0.025).
     """
     raw = min_steps + (lifetime_steps * growth_rate)
     quantized = int(round(raw / quantize) * quantize)
@@ -74,7 +57,7 @@ def parse_args():
     parser.add_argument("--timesteps", type=int, default=None, help="Explicit training steps (overrides dynamic curriculum)")
     parser.add_argument("--generation", type=int, default=None, help="Generation index for curriculum benchmarking")
     parser.add_argument("--render-mode", type=str, default=None, choices=["human", None], help="Render mode")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda/cpu)")
+    parser.add_argument("--device", type=str, default="auto", help="Device (auto/cuda/cpu)")
     parser.add_argument("--log-dir", type=str, default="logs", help="Tensorboard log directory")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Model checkpoints directory")
     parser.add_argument("--rnd-beta", type=float, default=0.05, help="Weight for normalized RND intrinsic reward (default: 0.05)")
@@ -84,6 +67,13 @@ def parse_args():
     parser.add_argument("--epsilon-start", type=float, default=1.0, help="Initial exploration rate for QR-DQN (default: 1.0)")
     parser.add_argument("--epsilon-end", type=float, default=0.20, help="Final exploration rate / epsilon-floor for QR-DQN (default: 0.20)")
     parser.add_argument("--epsilon-decay-steps", type=int, default=5_000_000, help="Epsilon decay steps for QR-DQN (default: 5,000,000)")
+    parser.add_argument("--n-stack", type=int, default=4, help="Number of stacked grayscale frames per observation (default: 4)")
+    parser.add_argument("--buffer-size", type=int, default=50_000, help="QR-DQN replay buffer capacity (default: 50,000)")
+    parser.add_argument("--growth-rate", type=float, default=0.025, help="Dynamic curriculum growth rate (default: 0.025 = 2.5%%)")
+    parser.add_argument("--states", type=str, default=None, help="Optional comma-separated save states for mixed curriculum starts")
+    parser.add_argument("--warm-start-from", type=str, default=None, help="Path to pretrained checkpoint to transfer weights from")
+    parser.add_argument("--reset-value-head", action="store_true", help="Re-initialize PPO value head when warm-starting under new rewards")
+    parser.add_argument("--reset-rnd", action="store_true", help="Reset RND predictor and normalization stats instead of loading saved RND state")
     parser.add_argument("--visual-eval", action="store_true", help="Enable periodic evaluation GIF recordings")
     parser.add_argument("--eval-freq", type=int, default=20480, help="Timestep frequency for periodic visual evaluations")
     parser.add_argument("--eval-steps", type=int, default=400, help="Maximum steps per visual evaluation episode")
@@ -99,7 +89,13 @@ def parse_args():
 
 
 def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_dir, checkpoint_dir, active_modes):
-    """Executes off-policy QR-DQN training loop with PER and multi-modal curiosity."""
+    """Executes off-policy QR-DQN training loop with PER and live non-stale RND curiosity."""
+    import torch
+    from pokefirered.coord_module import CoordinateExplorationModule
+    from pokefirered.rnd import RNDModule
+    from pokefirered.ssim_module import OptimizedSSIMModule
+    from pokefirered.models import QRDQNAgent
+
     in_channels = vec_env.observation_space.shape[0]
     num_actions = vec_env.action_space.n
 
@@ -111,7 +107,7 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
         gamma=0.99,
         tau=0.005,
         kappa=1.0,
-        buffer_size=50_000,
+        buffer_size=args.buffer_size,
         batch_size=64,
         device=args.device,
     )
@@ -120,24 +116,30 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
     if not args.fresh and model_file_pth.exists():
         print(f"Loading existing QR-DQN model from {model_file_pth}...")
         agent.load(model_file_pth)
+    elif args.warm_start_from:
+        ws_path = Path(args.warm_start_from)
+        if ws_path.exists():
+            print(f"Warm-starting QR-DQN weights from {ws_path}...")
+            agent.load(ws_path, load_buffer=False, warm_start=True)
 
     # Initialize Exploration modules
     rnd_module = RNDModule(device=args.device) if "RND" in active_modes else None
     ssim_module = OptimizedSSIMModule(device=args.device) if "SSIM" in active_modes else None
     coord_module = CoordinateExplorationModule(beta=args.coord_beta) if "COORD" in active_modes else None
 
-    if rnd_module is not None and rnd_path.exists():
-        rnd_module.load(str(rnd_path))
-    if ssim_module is not None and ssim_path.exists():
-        ssim_module.load(str(ssim_path))
-    if coord_module is not None and coord_path.exists():
-        coord_module.load(str(coord_path))
+    if not args.reset_rnd:
+        if rnd_module is not None and rnd_path.exists():
+            rnd_module.load(str(rnd_path))
+        if ssim_module is not None and ssim_path.exists():
+            ssim_module.load(str(ssim_path))
+        if coord_module is not None and coord_path.exists():
+            coord_module.load(str(coord_path))
 
     current_lifetime = agent.num_timesteps
     if args.timesteps is not None:
         total_target_timesteps = args.timesteps
     else:
-        total_target_timesteps = compute_dynamic_timesteps(current_lifetime)
+        total_target_timesteps = compute_dynamic_timesteps(current_lifetime, growth_rate=args.growth_rate)
 
     target_iterations = max(1, total_target_timesteps // args.num_envs)
     total_steps = target_iterations * args.num_envs
@@ -194,14 +196,15 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
 
             for i in range(args.num_envs):
                 r_ext = float(rewards[i])
-                r_int = 0.0
+                r_rnd = 0.0
+                r_other_int = 0.0
 
                 if r_rnd_vec is not None:
-                    r_int += args.rnd_beta * float(r_rnd_vec[i])
+                    r_rnd = args.rnd_beta * float(r_rnd_vec[i])
                 if r_ssim_vec is not None:
-                    r_int += args.ssim_beta * float(r_ssim_vec[i])
+                    r_other_int += args.ssim_beta * float(r_ssim_vec[i])
                 if r_coord_vec is not None:
-                    r_int += args.coord_beta * float(r_coord_vec[i])
+                    r_other_int += args.coord_beta * float(r_coord_vec[i])
 
                 # Ground-truth RAM coordinates tracking
                 info = infos[i]
@@ -221,14 +224,14 @@ def train_qrdqn(args, vec_env, model_path, rnd_path, ssim_path, coord_path, log_
                         agent_trajectories[i].append((mb, mn, x, y))
 
                 total_extrinsic += r_ext
-                total_intrinsic += r_int
-                r_total = r_ext + r_int
+                total_intrinsic += (r_rnd + r_other_int)
+                # Store non-RND reward in PER buffer; RND is evaluated live during sample updates
+                # to prevent stale RND values from corrupting Q-targets.
+                r_stored = r_ext + r_other_int
+                agent.buffer.add(obs[i], actions[i], r_stored, next_obs[i], dones[i])
 
-                # Add transition to Prioritized Replay Buffer
-                agent.buffer.add(obs[i], actions[i], r_total, next_obs[i], dones[i])
-
-            # Optimize QR-DQN network with Quantile Huber loss
-            metrics = agent.update()
+            # Optimize QR-DQN network with Quantile Huber loss + live RND evaluation
+            metrics = agent.update(rnd_module=rnd_module, rnd_beta=args.rnd_beta)
             obs = next_obs
 
             if (step + 1) % 100 == 0 or step == target_iterations - 1:
@@ -319,6 +322,26 @@ def main():
     import multiprocessing
     multiprocessing.freeze_support()
     args = parse_args()
+
+    import torch
+    from stable_baselines3 import PPO
+    from pokefirered.callbacks import (
+        ComprehensiveLoggingCallback,
+        RewardTrackingCallback,
+        RNDCallback,
+        SSIMCallback,
+        CoordinateExplorationCallback,
+        RAMExplorationTrackerCallback,
+        PeriodicVisualEvalCallback,
+    )
+    from pokefirered.coord_module import CoordinateExplorationModule
+    from pokefirered.env_factory import create_vectorized_env
+    from pokefirered.rnd import RNDModule
+    from pokefirered.ssim_module import OptimizedSSIMModule
+
+    if args.device == "auto":
+        args.device = "cuda" if torch.cuda.is_available() else "cpu"
+
     checkpoint_dir = PROJECT_ROOT / args.checkpoint_dir
     log_dir = PROJECT_ROOT / args.log_dir
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -339,12 +362,16 @@ def main():
     print(f" TensorBoard:  {log_dir}")
     print("=" * 65)
 
+    # Parse optional stepping-stone save-state pool
+    states_list = [s.strip() for s in args.states.split(",") if s.strip()] if args.states else None
+
     # Create vectorized environment
-    print(f"Creating {args.num_envs} vectorized environments...")
+    print(f"Creating {args.num_envs} vectorized environments (n_stack={args.n_stack})...")
     vec_env = create_vectorized_env(
         env_name=args.env_name,
+        states=states_list,
         num_envs=args.num_envs,
-        n_stack=2,
+        n_stack=args.n_stack,
         render_mode=args.render_mode,
         exploration_mode="SSIM" if "LEGACY_SSIM" in active_modes else "NONE",
     )
@@ -360,17 +387,38 @@ def main():
         coord_module = CoordinateExplorationModule(beta=args.coord_beta) if "COORD" in active_modes else None
 
         model_file_zip = model_path.with_suffix(".zip")
+        warm_starting = False
         if not args.fresh and model_file_zip.exists():
             print(f"Loading existing model from {model_file_zip}...")
             model = PPO.load(str(model_path), env=vec_env, device=args.device)
             model.tensorboard_log = str(log_dir)
             model.ent_coef = args.ent_coef
-            if rnd_module is not None and rnd_path.exists():
-                rnd_module.load(str(rnd_path))
-            if ssim_module is not None and ssim_path.exists():
-                ssim_module.load(str(ssim_path))
-            if coord_module is not None and coord_path.exists():
-                coord_module.load(str(coord_path))
+            if not args.reset_rnd:
+                if rnd_module is not None and rnd_path.exists():
+                    rnd_module.load(str(rnd_path))
+                if ssim_module is not None and ssim_path.exists():
+                    ssim_module.load(str(ssim_path))
+                if coord_module is not None and coord_path.exists():
+                    coord_module.load(str(coord_path))
+        elif args.warm_start_from and Path(args.warm_start_from).exists():
+            print(f"Warm-starting PPO policy from {args.warm_start_from}...")
+            model = PPO.load(str(args.warm_start_from), env=vec_env, device=args.device)
+            model.tensorboard_log = str(log_dir)
+            model.ent_coef = args.ent_coef
+            model.num_timesteps = 0
+            warm_starting = True
+            if args.reset_value_head:
+                print("[WARM-START] Re-initializing PPO value head for recalibrated reward scale...")
+                for layer in model.policy.value_net.modules():
+                    if hasattr(layer, "reset_parameters"):
+                        layer.reset_parameters()
+                if hasattr(model.policy.mlp_extractor, "value_net"):
+                    for layer in model.policy.mlp_extractor.value_net.modules():
+                        if hasattr(layer, "reset_parameters"):
+                            layer.reset_parameters()
+            if not args.reset_rnd:
+                if rnd_module is not None and rnd_path.exists():
+                    rnd_module.load(str(rnd_path))
         else:
             print("No existing model found. Initializing new PPO model...")
             # Align rollout buffer with 2048 step quantum so dynamic curriculum steps divide evenly
@@ -396,7 +444,7 @@ def main():
         if args.timesteps is not None:
             target_steps = args.timesteps
         else:
-            target_steps = compute_dynamic_timesteps(current_lifetime)
+            target_steps = compute_dynamic_timesteps(current_lifetime, growth_rate=args.growth_rate)
 
         print("\n" + "=" * 55)
         print(f"[PPO] Model Lifetime Before Run: {current_lifetime:,} steps")
@@ -426,6 +474,7 @@ def main():
                 eval_freq=args.eval_freq,
                 max_eval_steps=args.eval_steps,
                 env_name=args.env_name,
+                n_stack=args.n_stack,
             ))
 
         start_time = time.time()
@@ -434,7 +483,7 @@ def main():
                 total_timesteps=target_steps,
                 callback=callbacks,
                 tb_log_name=run_name,
-                reset_num_timesteps=False,
+                reset_num_timesteps=warm_starting,
             )
             completed_steps = target_steps
         except KeyboardInterrupt:

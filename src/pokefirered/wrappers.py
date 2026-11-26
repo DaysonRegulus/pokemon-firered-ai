@@ -1,6 +1,31 @@
+import cv2
 import numpy as np
 import gymnasium as gym
 from pokefirered.rewards import RewardManager, ScreenshotManager
+
+
+class WarpFrame(gym.ObservationWrapper):
+    """
+    Lightweight OpenCV grayscale 84x84 wrapper matching SB3's WarpFrame
+    without pulling stable_baselines3/torch into SubprocVecEnv workers.
+    """
+
+    def __init__(self, env: gym.Env, width: int = 84, height: int = 84) -> None:
+        super().__init__(env)
+        self.width = width
+        self.height = height
+        assert isinstance(env.observation_space, gym.spaces.Box), f"Expected Box space, got {env.observation_space}"
+        self.observation_space = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(self.height, self.width, 1),
+            dtype=env.observation_space.dtype,
+        )
+
+    def observation(self, frame: np.ndarray) -> np.ndarray:
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
+        return frame[:, :, None]
 
 
 class ActionFilterWrapper(gym.ActionWrapper):
@@ -69,7 +94,7 @@ class StochasticFrameSkip(gym.Wrapper):
 
 
 class CustomRewardEnv(gym.Wrapper):
-    def __init__(self, base_env, env_id=0, exploration_mode="SSIM"):
+    def __init__(self, base_env, env_id=0, exploration_mode="SSIM", reward_frame_skip=1):
         super().__init__(base_env)
         self.base_env = base_env
         self.env_id = env_id
@@ -79,7 +104,12 @@ class CustomRewardEnv(gym.Wrapper):
         else:
             self.screenshot_manager = None
 
-        self.reward_manager = RewardManager(self.base_env, self.screenshot_manager, exploration_mode=exploration_mode)
+        self.reward_manager = RewardManager(
+            self.base_env,
+            self.screenshot_manager,
+            exploration_mode=exploration_mode,
+            frame_skip=reward_frame_skip,
+        )
         self.episode_faints = 0
 
     def reset(self, **kwargs):
@@ -122,10 +152,6 @@ class CustomRewardEnv(gym.Wrapper):
         info['map_num'] = int(ram[0x02031DBD - BASE])
         info['pos_x'] = int(ram[0x02036E48 - BASE])
         info['pos_y'] = int(ram[0x02036E4A - BASE])
-
-        rnd_reward = info.get("rnd_intrinsic_reward", 0)
-        if rnd_reward != 0:
-            print(f"[{self.env_id}][RND][REWARD] (+{rnd_reward:.4f})")
 
         if terminated or truncated:
             self.episode_faints = 0
